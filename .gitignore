@@ -1,0 +1,23 @@
+# Node / React dependencies and build files
+node_modules/
+dist/
+build/
+.env
+.env.local
+
+# C# / .NET build files
+bin/
+obj/
+.vs/
+*.user
+*.suo
+appsettings.Development.json
+
+# SQL Server physical files (PROHIBITED BY SYLLABUS)
+*.mdf
+*.ldf
+*.ndf
+
+# OS junk files
+.DS_Store
+Thumbs.db
