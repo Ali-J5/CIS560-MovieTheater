@@ -2,6 +2,8 @@
   <PropertyGroup>
     <!-- Target the course-required .NET 8 framework and enable null-safety checks. -->
     <TargetFramework>net8.0</TargetFramework>
+    <!-- Allow this .NET 8 app to run on the installed .NET 9 (or newer) runtime. -->
+    <RollForward>LatestMajor</RollForward>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
