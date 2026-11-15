@@ -43,7 +43,7 @@ public class ShowtimesController : ControllerBase
             cmd.Parameters.Add("@MovieID", SqlDbType.Int).Value = (object?)(movieId) ?? DBNull.Value;
             cmd.Parameters.Add("@FirstDate", SqlDbType.Date).Value = (object?)(firstDate?.ToDateTime(TimeOnly.MinValue)) ?? DBNull.Value;
             cmd.Parameters.Add("@LastDate", SqlDbType.Date).Value = (object?)(lastDate?.ToDateTime(TimeOnly.MinValue)) ?? DBNull.Value;
-            cmd.Parameters.Add("@IncludeCancelled", SqlDbType.Bit).Value = (object?)(includeCancelled) ?? DBNull.Value;
+            cmd.Parameters.Add("@IncludeCancelled", SqlDbType.Bit).Value = includeCancelled;
 
             // Step 4: Execute the procedure and read each result row into a plain C# object.
             var results = new List<Showtime>();
@@ -64,6 +64,7 @@ public class ShowtimesController : ControllerBase
                     StartDateTime = (DateTime)reader["StartDateTime"],
                     TicketPrice = (decimal)reader["TicketPrice"],
                     IsCancelled = (bool)reader["IsCancelled"],
+                    CancelledOn = reader["CancelledOn"] == DBNull.Value ? null : (DateTime)reader["CancelledOn"],
                     TicketsSold = (long)reader["TicketsSold"],
                     RemainingSeats = (long)reader["RemainingSeats"],
                 });
@@ -96,14 +97,14 @@ public class ShowtimesController : ControllerBase
 
             // Step 3: Bind values separately from SQL text to prevent SQL injection.
             // Explicit SQL types and lengths match the procedure; DBNull.Value represents SQL NULL.
-            cmd.Parameters.Add("@MovieID", SqlDbType.Int).Value = (object?)(request.MovieId) ?? DBNull.Value;
-            cmd.Parameters.Add("@ScreenRoomID", SqlDbType.Int).Value = (object?)(request.ScreenRoomId) ?? DBNull.Value;
-            cmd.Parameters.Add("@StartDateTime", SqlDbType.DateTime2).Value = (object?)(request.StartDateTime) ?? DBNull.Value;
+            cmd.Parameters.Add("@MovieID", SqlDbType.Int).Value = request.MovieId;
+            cmd.Parameters.Add("@ScreenRoomID", SqlDbType.Int).Value = request.ScreenRoomId;
+            cmd.Parameters.Add("@StartDateTime", SqlDbType.DateTime2).Value = request.StartDateTime;
             SqlParameter ticketPriceParameter = cmd.Parameters.Add("@TicketPrice", SqlDbType.Decimal);
             ticketPriceParameter.Precision = 10;
             ticketPriceParameter.Scale = 2;
             ticketPriceParameter.Value = request.TicketPrice;
-            cmd.Parameters.Add("@IsCancelled", SqlDbType.Bit).Value = (object?)(request.IsCancelled) ?? DBNull.Value;
+            cmd.Parameters.Add("@IsCancelled", SqlDbType.Bit).Value = request.IsCancelled;
 
             // Step 4: Read the identifier returned by the write procedure.
             using SqlDataReader reader = await cmd.ExecuteReaderAsync();
@@ -139,15 +140,15 @@ public class ShowtimesController : ControllerBase
 
             // Step 3: Bind values separately from SQL text to prevent SQL injection.
             // Explicit SQL types and lengths match the procedure; DBNull.Value represents SQL NULL.
-            cmd.Parameters.Add("@ShowtimeID", SqlDbType.Int).Value = (object?)(id) ?? DBNull.Value;
-            cmd.Parameters.Add("@MovieID", SqlDbType.Int).Value = (object?)(request.MovieId) ?? DBNull.Value;
-            cmd.Parameters.Add("@ScreenRoomID", SqlDbType.Int).Value = (object?)(request.ScreenRoomId) ?? DBNull.Value;
-            cmd.Parameters.Add("@StartDateTime", SqlDbType.DateTime2).Value = (object?)(request.StartDateTime) ?? DBNull.Value;
+            cmd.Parameters.Add("@ShowtimeID", SqlDbType.Int).Value = id;
+            cmd.Parameters.Add("@MovieID", SqlDbType.Int).Value = request.MovieId;
+            cmd.Parameters.Add("@ScreenRoomID", SqlDbType.Int).Value = request.ScreenRoomId;
+            cmd.Parameters.Add("@StartDateTime", SqlDbType.DateTime2).Value = request.StartDateTime;
             SqlParameter ticketPriceParameter = cmd.Parameters.Add("@TicketPrice", SqlDbType.Decimal);
             ticketPriceParameter.Precision = 10;
             ticketPriceParameter.Scale = 2;
             ticketPriceParameter.Value = request.TicketPrice;
-            cmd.Parameters.Add("@IsCancelled", SqlDbType.Bit).Value = (object?)(request.IsCancelled) ?? DBNull.Value;
+            cmd.Parameters.Add("@IsCancelled", SqlDbType.Bit).Value = request.IsCancelled;
 
             // Step 4: Read the identifier returned by the write procedure.
             using SqlDataReader reader = await cmd.ExecuteReaderAsync();

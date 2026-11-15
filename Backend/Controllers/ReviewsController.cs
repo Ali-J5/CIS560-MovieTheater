@@ -87,9 +87,9 @@ public class ReviewsController : ControllerBase
 
             // Step 3: Bind values separately from SQL text to prevent SQL injection.
             // Explicit SQL types and lengths match the procedure; DBNull.Value represents SQL NULL.
-            cmd.Parameters.Add("@CustomerID", SqlDbType.Int).Value = (object?)(request.CustomerId) ?? DBNull.Value;
-            cmd.Parameters.Add("@MovieID", SqlDbType.Int).Value = (object?)(request.MovieId) ?? DBNull.Value;
-            cmd.Parameters.Add("@Rating", SqlDbType.TinyInt).Value = (object?)(request.Rating) ?? DBNull.Value;
+            cmd.Parameters.Add("@CustomerID", SqlDbType.Int).Value = request.CustomerId;
+            cmd.Parameters.Add("@MovieID", SqlDbType.Int).Value = request.MovieId;
+            cmd.Parameters.Add("@Rating", SqlDbType.TinyInt).Value = request.Rating;
             cmd.Parameters.Add("@ReviewText", SqlDbType.NVarChar, -1).Value = (object?)request.ReviewText ?? DBNull.Value;
 
             // Step 4: Read the identifier returned by the write procedure.
@@ -126,10 +126,10 @@ public class ReviewsController : ControllerBase
 
             // Step 3: Bind values separately from SQL text to prevent SQL injection.
             // Explicit SQL types and lengths match the procedure; DBNull.Value represents SQL NULL.
-            cmd.Parameters.Add("@ReviewID", SqlDbType.Int).Value = (object?)(id) ?? DBNull.Value;
-            cmd.Parameters.Add("@CustomerID", SqlDbType.Int).Value = (object?)(request.CustomerId) ?? DBNull.Value;
-            cmd.Parameters.Add("@MovieID", SqlDbType.Int).Value = (object?)(request.MovieId) ?? DBNull.Value;
-            cmd.Parameters.Add("@Rating", SqlDbType.TinyInt).Value = (object?)(request.Rating) ?? DBNull.Value;
+            cmd.Parameters.Add("@ReviewID", SqlDbType.Int).Value = id;
+            cmd.Parameters.Add("@CustomerID", SqlDbType.Int).Value = request.CustomerId;
+            cmd.Parameters.Add("@MovieID", SqlDbType.Int).Value = request.MovieId;
+            cmd.Parameters.Add("@Rating", SqlDbType.TinyInt).Value = request.Rating;
             cmd.Parameters.Add("@ReviewText", SqlDbType.NVarChar, -1).Value = (object?)request.ReviewText ?? DBNull.Value;
 
             // Step 4: Read the identifier returned by the write procedure.
@@ -166,7 +166,7 @@ public class ReviewsController : ControllerBase
 
             // Step 3: Bind values separately from SQL text to prevent SQL injection.
             // Explicit SQL types and lengths match the procedure; DBNull.Value represents SQL NULL.
-            cmd.Parameters.Add("@ReviewID", SqlDbType.Int).Value = (object?)(id) ?? DBNull.Value;
+            cmd.Parameters.Add("@ReviewID", SqlDbType.Int).Value = id;
 
             // Step 4: Execute the delete; the procedure throws if the identifier does not exist.
             // Do not interpret the affected-row count: our procedures use SET NOCOUNT ON.

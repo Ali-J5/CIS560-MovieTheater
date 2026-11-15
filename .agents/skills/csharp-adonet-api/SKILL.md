@@ -43,3 +43,8 @@ while (await reader.ReadAsync())
 
 ## 4. Friendly SQL Error Handling
 Catch `SqlException` in `POST`/`PUT`/`DELETE` endpoints (such as overlap errors, capacity errors, or `UNIQUE`/`CHECK` constraint failures) and return `BadRequest(new { error = ex.Message })` so the React frontend can display the exact database rule message in a red banner for the demo!
+
+## Schema and Parameter Clarity
+- The schema has six operational tables and the static AgeRating lookup; Movie ratings are foreign keys.
+- Bind nonnullable values directly using explicit SqlDbType; reserve DBNull.Value for genuinely nullable values. Foreign-key comments describe related rows rather than locally generated IDs.
+- Map nullable SQL-managed `DeactivatedOn` on Movie/ScreenRoom/Customer and `CancelledOn` on Showtime into response DTOs. Do not add them to request DTOs.

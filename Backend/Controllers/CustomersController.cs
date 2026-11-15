@@ -39,7 +39,7 @@ public class CustomersController : ControllerBase
 
             // Step 3: Bind values separately from SQL text to prevent SQL injection.
             // Explicit SQL types and lengths match the procedure; DBNull.Value represents SQL NULL.
-            cmd.Parameters.Add("@IncludeInactive", SqlDbType.Bit).Value = (object?)(includeInactive) ?? DBNull.Value;
+            cmd.Parameters.Add("@IncludeInactive", SqlDbType.Bit).Value = includeInactive;
 
             // Step 4: Execute the procedure and read each result row into a plain C# object.
             var results = new List<Customer>();
@@ -55,6 +55,7 @@ public class CustomersController : ControllerBase
                     FirstName = (string)reader["FirstName"],
                     LastName = (string)reader["LastName"],
                     IsActive = (bool)reader["IsActive"],
+                    DeactivatedOn = reader["DeactivatedOn"] == DBNull.Value ? null : (DateTime)reader["DeactivatedOn"],
                 });
             }
 
@@ -85,11 +86,11 @@ public class CustomersController : ControllerBase
 
             // Step 3: Bind values separately from SQL text to prevent SQL injection.
             // Explicit SQL types and lengths match the procedure; DBNull.Value represents SQL NULL.
-            cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 200).Value = (object?)request.Email ?? DBNull.Value;
-            cmd.Parameters.Add("@PhoneNumber", SqlDbType.VarChar, 25).Value = (object?)request.PhoneNumber ?? DBNull.Value;
-            cmd.Parameters.Add("@FirstName", SqlDbType.NVarChar, 50).Value = (object?)request.FirstName ?? DBNull.Value;
-            cmd.Parameters.Add("@LastName", SqlDbType.NVarChar, 50).Value = (object?)request.LastName ?? DBNull.Value;
-            cmd.Parameters.Add("@IsActive", SqlDbType.Bit).Value = (object?)(request.IsActive) ?? DBNull.Value;
+            cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 200).Value = request.Email;
+            cmd.Parameters.Add("@PhoneNumber", SqlDbType.VarChar, 25).Value = request.PhoneNumber;
+            cmd.Parameters.Add("@FirstName", SqlDbType.NVarChar, 50).Value = request.FirstName;
+            cmd.Parameters.Add("@LastName", SqlDbType.NVarChar, 50).Value = request.LastName;
+            cmd.Parameters.Add("@IsActive", SqlDbType.Bit).Value = request.IsActive;
 
             // Step 4: Read the identifier returned by the write procedure.
             using SqlDataReader reader = await cmd.ExecuteReaderAsync();
@@ -125,12 +126,12 @@ public class CustomersController : ControllerBase
 
             // Step 3: Bind values separately from SQL text to prevent SQL injection.
             // Explicit SQL types and lengths match the procedure; DBNull.Value represents SQL NULL.
-            cmd.Parameters.Add("@CustomerID", SqlDbType.Int).Value = (object?)(id) ?? DBNull.Value;
-            cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 200).Value = (object?)request.Email ?? DBNull.Value;
-            cmd.Parameters.Add("@PhoneNumber", SqlDbType.VarChar, 25).Value = (object?)request.PhoneNumber ?? DBNull.Value;
-            cmd.Parameters.Add("@FirstName", SqlDbType.NVarChar, 50).Value = (object?)request.FirstName ?? DBNull.Value;
-            cmd.Parameters.Add("@LastName", SqlDbType.NVarChar, 50).Value = (object?)request.LastName ?? DBNull.Value;
-            cmd.Parameters.Add("@IsActive", SqlDbType.Bit).Value = (object?)(request.IsActive) ?? DBNull.Value;
+            cmd.Parameters.Add("@CustomerID", SqlDbType.Int).Value = id;
+            cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 200).Value = request.Email;
+            cmd.Parameters.Add("@PhoneNumber", SqlDbType.VarChar, 25).Value = request.PhoneNumber;
+            cmd.Parameters.Add("@FirstName", SqlDbType.NVarChar, 50).Value = request.FirstName;
+            cmd.Parameters.Add("@LastName", SqlDbType.NVarChar, 50).Value = request.LastName;
+            cmd.Parameters.Add("@IsActive", SqlDbType.Bit).Value = request.IsActive;
 
             // Step 4: Read the identifier returned by the write procedure.
             using SqlDataReader reader = await cmd.ExecuteReaderAsync();

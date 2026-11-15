@@ -10,6 +10,27 @@ DROP TABLE IF EXISTS dbo.Showtime;
 DROP TABLE IF EXISTS dbo.Customer;
 DROP TABLE IF EXISTS dbo.ScreenRoom;
 DROP TABLE IF EXISTS dbo.Movie;
+DROP TABLE IF EXISTS dbo.AgeRating;
+GO
+
+-- Static rating codes are shared by the catalog; this relation is not user-editable.
+CREATE TABLE dbo.AgeRating
+(
+    -- The published rating code is the natural primary key.
+    AgeRating NVARCHAR(10) NOT NULL,
+    -- Explain the audience guidance for each supported rating.
+    Description NVARCHAR(200) NOT NULL,
+    CONSTRAINT PK_AgeRating PRIMARY KEY (AgeRating)
+);
+GO
+-- Populate the lookup before any Movie row can reference it.
+INSERT dbo.AgeRating (AgeRating, Description) VALUES
+(N'G', N'General audiences; all ages admitted.'),
+(N'PG', N'Parental guidance suggested.'),
+(N'PG-13', N'Parents strongly cautioned; some material may be inappropriate for children under 13.'),
+(N'R', N'Restricted; children under 17 require an accompanying parent or adult guardian.'),
+(N'NC-17', N'No one 17 and under admitted.'),
+(N'NR', N'Not rated.');
 GO
 
 -- Movie stores the movie catalog; deactivate rows to retain history.
@@ -31,14 +52,16 @@ CREATE TABLE dbo.Movie
     Description NVARCHAR(MAX) NULL,
     -- Default new records to active.
     IsActive BIT NOT NULL CONSTRAINT DF_Movie_IsActive DEFAULT (1),
+    -- Preserve the first deactivation time; reactivation clears this value.
+    DeactivatedOn DATETIME2 NULL,
     -- Uniquely identify every movie row.
     CONSTRAINT PK_Movie PRIMARY KEY (MovieID),
     -- Prevent duplicate releases while allowing remakes.
     CONSTRAINT UQ_Movie_Title_ReleaseDate UNIQUE (Title, ReleaseDate),
     -- Require a positive runtime in minutes.
     CONSTRAINT CK_Movie_Runtime CHECK (RuntimeMinutes > 0),
-    -- Allow only the supported age ratings.
-    CONSTRAINT CK_Movie_AgeRating CHECK (AgeRating IN (N'G', N'PG', N'PG-13', N'R', N'NC-17', N'NR'))
+    -- Require a supported code from the static rating relation.
+    CONSTRAINT FK_Movie_AgeRating FOREIGN KEY (AgeRating) REFERENCES dbo.AgeRating(AgeRating)
 );
 GO
 
@@ -57,6 +80,8 @@ CREATE TABLE dbo.ScreenRoom
     Capacity INT NOT NULL,
     -- Default new records to active.
     IsActive BIT NOT NULL CONSTRAINT DF_ScreenRoom_IsActive DEFAULT (1),
+    -- Preserve the first deactivation time; reactivation clears this value.
+    DeactivatedOn DATETIME2 NULL,
     -- Uniquely identify every screenroom row.
     CONSTRAINT PK_ScreenRoom PRIMARY KEY (ScreenRoomID),
     -- Give each physical room a unique number.
@@ -81,6 +106,8 @@ CREATE TABLE dbo.Customer
     LastName NVARCHAR(50) NOT NULL,
     -- Default new records to active.
     IsActive BIT NOT NULL CONSTRAINT DF_Customer_IsActive DEFAULT (1),
+    -- Preserve the first deactivation time; reactivation clears this value.
+    DeactivatedOn DATETIME2 NULL,
     -- Uniquely identify every customer row.
     CONSTRAINT PK_Customer PRIMARY KEY (CustomerID),
     -- Prevent duplicate email addresses.
@@ -105,6 +132,8 @@ CREATE TABLE dbo.Showtime
     TicketPrice DECIMAL(10,2) NOT NULL,
     -- Default new screenings to not cancelled.
     IsCancelled BIT NOT NULL CONSTRAINT DF_Showtime_IsCancelled DEFAULT (0),
+    -- Preserve the first cancellation time; restoration clears this value.
+    CancelledOn DATETIME2 NULL,
     -- Uniquely identify every showtime row.
     CONSTRAINT PK_Showtime PRIMARY KEY (ShowtimeID),
     -- Require an existing movie; no cascading deletion.

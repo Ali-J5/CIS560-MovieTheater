@@ -8,10 +8,10 @@ public class Review
     // ReviewID: generated row identifier.
     public int ReviewId { get; set; }
 
-    // CustomerID: generated row identifier.
+    // CustomerID: foreign key identifying the related Customer row.
     public int CustomerId { get; set; }
 
-    // MovieID: generated row identifier.
+    // MovieID: foreign key identifying the related Movie row.
     public int MovieId { get; set; }
 
     // FirstName: value read from the matching SQL result column.

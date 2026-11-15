@@ -30,3 +30,9 @@ description: Use whenever creating or updating the React frontend components, pa
      - *Screen Room Utilization* (`FirstDate`, `LastDate` date inputs)
      - *Movie Review Summary* (`MinimumReviewCount` number input)
      Renders clean HTML tables that can be screenshotted directly for the CIS 560 Project Report.
+
+## Readability and Status History
+- Format JSX and CSS using readable multi-line indentation; explain state, effects, and submissions.
+- Surrogate IDs remain in API payloads and React keys, but display them only in the four admin reports. Use movie titles, room names, and local dates in headings, booking cards, and accessible action labels.
+- The static AgeRating lookup supplies the six supported rating codes in SQL. Keep the UI rating options consistent with those codes.
+- Nullable `DeactivatedOn` and `CancelledOn` are read-only response fields managed by SQL; show available history dates without extra form inputs.

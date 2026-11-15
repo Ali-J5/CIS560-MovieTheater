@@ -12,4 +12,9 @@
     <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.8" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.3.1" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Include the three SQL scripts in builds/publishes so setup also works outside this checkout. -->
+    <Content Include="../Database/*.sql" Link="Database/%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

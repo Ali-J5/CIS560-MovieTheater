@@ -43,7 +43,7 @@ public class MoviesController : ControllerBase
             cmd.Parameters.Add("@Title", SqlDbType.NVarChar, 200).Value = (object?)title ?? DBNull.Value;
             cmd.Parameters.Add("@Genre", SqlDbType.NVarChar, 50).Value = (object?)genre ?? DBNull.Value;
             cmd.Parameters.Add("@AgeRating", SqlDbType.NVarChar, 10).Value = (object?)ageRating ?? DBNull.Value;
-            cmd.Parameters.Add("@IncludeInactive", SqlDbType.Bit).Value = (object?)(includeInactive) ?? DBNull.Value;
+            cmd.Parameters.Add("@IncludeInactive", SqlDbType.Bit).Value = includeInactive;
 
             // Step 4: Execute the procedure and read each result row into a plain C# object.
             var results = new List<Movie>();
@@ -61,6 +61,7 @@ public class MoviesController : ControllerBase
                     AgeRating = (string)reader["AgeRating"],
                     Description = reader["Description"] == DBNull.Value ? null : (string)reader["Description"],
                     IsActive = (bool)reader["IsActive"],
+                    DeactivatedOn = reader["DeactivatedOn"] == DBNull.Value ? null : (DateTime)reader["DeactivatedOn"],
                 });
             }
 
@@ -91,13 +92,13 @@ public class MoviesController : ControllerBase
 
             // Step 3: Bind values separately from SQL text to prevent SQL injection.
             // Explicit SQL types and lengths match the procedure; DBNull.Value represents SQL NULL.
-            cmd.Parameters.Add("@Title", SqlDbType.NVarChar, 200).Value = (object?)request.Title ?? DBNull.Value;
-            cmd.Parameters.Add("@ReleaseDate", SqlDbType.Date).Value = (object?)(request.ReleaseDate.ToDateTime(TimeOnly.MinValue)) ?? DBNull.Value;
-            cmd.Parameters.Add("@Genre", SqlDbType.NVarChar, 50).Value = (object?)request.Genre ?? DBNull.Value;
-            cmd.Parameters.Add("@RuntimeMinutes", SqlDbType.Int).Value = (object?)(request.RuntimeMinutes) ?? DBNull.Value;
-            cmd.Parameters.Add("@AgeRating", SqlDbType.NVarChar, 10).Value = (object?)request.AgeRating ?? DBNull.Value;
+            cmd.Parameters.Add("@Title", SqlDbType.NVarChar, 200).Value = request.Title;
+            cmd.Parameters.Add("@ReleaseDate", SqlDbType.Date).Value = request.ReleaseDate.ToDateTime(TimeOnly.MinValue);
+            cmd.Parameters.Add("@Genre", SqlDbType.NVarChar, 50).Value = request.Genre;
+            cmd.Parameters.Add("@RuntimeMinutes", SqlDbType.Int).Value = request.RuntimeMinutes;
+            cmd.Parameters.Add("@AgeRating", SqlDbType.NVarChar, 10).Value = request.AgeRating;
             cmd.Parameters.Add("@Description", SqlDbType.NVarChar, -1).Value = (object?)request.Description ?? DBNull.Value;
-            cmd.Parameters.Add("@IsActive", SqlDbType.Bit).Value = (object?)(request.IsActive) ?? DBNull.Value;
+            cmd.Parameters.Add("@IsActive", SqlDbType.Bit).Value = request.IsActive;
 
             // Step 4: Read the identifier returned by the write procedure.
             using SqlDataReader reader = await cmd.ExecuteReaderAsync();
@@ -133,14 +134,14 @@ public class MoviesController : ControllerBase
 
             // Step 3: Bind values separately from SQL text to prevent SQL injection.
             // Explicit SQL types and lengths match the procedure; DBNull.Value represents SQL NULL.
-            cmd.Parameters.Add("@MovieID", SqlDbType.Int).Value = (object?)(id) ?? DBNull.Value;
-            cmd.Parameters.Add("@Title", SqlDbType.NVarChar, 200).Value = (object?)request.Title ?? DBNull.Value;
-            cmd.Parameters.Add("@ReleaseDate", SqlDbType.Date).Value = (object?)(request.ReleaseDate.ToDateTime(TimeOnly.MinValue)) ?? DBNull.Value;
-            cmd.Parameters.Add("@Genre", SqlDbType.NVarChar, 50).Value = (object?)request.Genre ?? DBNull.Value;
-            cmd.Parameters.Add("@RuntimeMinutes", SqlDbType.Int).Value = (object?)(request.RuntimeMinutes) ?? DBNull.Value;
-            cmd.Parameters.Add("@AgeRating", SqlDbType.NVarChar, 10).Value = (object?)request.AgeRating ?? DBNull.Value;
+            cmd.Parameters.Add("@MovieID", SqlDbType.Int).Value = id;
+            cmd.Parameters.Add("@Title", SqlDbType.NVarChar, 200).Value = request.Title;
+            cmd.Parameters.Add("@ReleaseDate", SqlDbType.Date).Value = request.ReleaseDate.ToDateTime(TimeOnly.MinValue);
+            cmd.Parameters.Add("@Genre", SqlDbType.NVarChar, 50).Value = request.Genre;
+            cmd.Parameters.Add("@RuntimeMinutes", SqlDbType.Int).Value = request.RuntimeMinutes;
+            cmd.Parameters.Add("@AgeRating", SqlDbType.NVarChar, 10).Value = request.AgeRating;
             cmd.Parameters.Add("@Description", SqlDbType.NVarChar, -1).Value = (object?)request.Description ?? DBNull.Value;
-            cmd.Parameters.Add("@IsActive", SqlDbType.Bit).Value = (object?)(request.IsActive) ?? DBNull.Value;
+            cmd.Parameters.Add("@IsActive", SqlDbType.Bit).Value = request.IsActive;
 
             // Step 4: Read the identifier returned by the write procedure.
             using SqlDataReader reader = await cmd.ExecuteReaderAsync();

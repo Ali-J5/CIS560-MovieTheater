@@ -1,137 +1,144 @@
 # CIS 560 Movie Theater Booking System
 
-A single-theater booking project using SQL Server, an ASP.NET Core 8 Web API, and raw ADO.NET through `Microsoft.Data.SqlClient`.
-
-- `Database/Tables.sql`: six tables and named constraints. **Re-running this script drops existing project tables and data.**
-- `Database/Procedures.sql`: CRUD procedures, scheduling and booking rules, and four reports.
-- `Database/Data.sql`: seed data and integrity checks; requires empty tables.
-- `Backend/Program.cs`: HTTP server, controllers, CORS, and Swagger configuration.
-- `Backend/Models/`: request bodies and typed query results.
-- `Backend/Controllers/`: seven controllers that call the stored procedures directly.
-- `Frontend/`: React + Vite customer portal and admin dashboard (JavaScript, one CSS file).
-
-## Prepare SQL Server
-
-1. Start SQL Server and connect using SQL Server Management Studio or another SQL Server client.
-2. Create a database named `MovieTheaterDB` if it does not exist, then select it as the query database. For example, run `CREATE DATABASE MovieTheaterDB;` once in the client, then select that database.
-3. Run `Database/Tables.sql` to create all six tables. This drops existing project tables, so use it only when intentionally initializing/resetting this project database.
-4. Run `Database/Procedures.sql` to create the 24 stored procedures.
-5. Run `Database/Data.sql` once on the empty tables to load the demo data. The seed refuses to overwrite populated tables.
-
-The seed creates 110 movies, 10 rooms, 120 customers, 300 showtimes, 900 bookings, and 220 reviews.
-
-SQL Server must be running and reachable before database endpoints will succeed. LocalDB and Windows SQL Express are Windows options; on macOS, connect to a reachable SQL Server instance or container over TCP.
-
-## Run the backend
-
-Install the .NET 8 SDK or a newer SDK (this machine has .NET 9). The project targets `net8.0` and sets `<RollForward>LatestMajor</RollForward>`, allowing the normal run command to use the installed ASP.NET Core 9 runtime without an environment-variable workaround.
-
-Set `ConnectionStrings:DefaultConnection` in `Backend/appsettings.json` to your instance, database, and login. The file includes commented alternatives for LocalDB and SQL Express. ASP.NET Core supports comments in this configuration file.
-
-For an untracked local override, create `Backend/appsettings.Development.json` with this shape (substitute your own login):
-
-```json
-{
-  "ConnectionStrings": {
-    "DefaultConnection": "Server=localhost,1433;Database=MovieTheaterDB;User Id=sa;Password=YOUR_LOCAL_PASSWORD;Encrypt=True;TrustServerCertificate=True;Connect Timeout=5;"
-  }
-}
-```
-
-You can also set the `ConnectionStrings__DefaultConnection` environment variable. The checked-in password is a placeholder. `TrustServerCertificate=True` is provided for local development certificates.
-
-From the repository root:
+**After `git clone`, run one command from the project folder:**
 
 ```sh
-dotnet restore Backend/Backend.csproj
-dotnet build Backend/Backend.csproj
+./start.sh
+```
+
+On Windows, double-click **start.bat** or run:
+
+```bat
+start.bat
+```
+
+Open the **Frontend URL printed by the launcher** (normally **http://localhost:5173**). The API explorer is the printed backend URL plus `/swagger` (normally **http://localhost:5000/swagger**).
+
+Install these prerequisites once: **.NET SDK 8+**, **Node.js 22.12+ or 24+**, and a running **SQL Server**. The easiest SQL option on macOS/Linux is **Docker Desktop**, installed and running; Windows can also use **LocalDB** or a running **SQL Express** instance. First startup downloads NuGet/npm dependencies and, if needed, the SQL Server Docker image, so internet access is required. No AI assistant, SQL client, manual database creation, or global Vite install is needed.
+
+The launchers check tools and ports, use an available local SQL Server or start the project's Docker container, install frontend dependencies with `npm ci` if `node_modules` is missing, start the backend, wait for database setup, then start React. On macOS/Linux, Ctrl+C stops both apps. On Windows, use Ctrl+C in each app's console. SQL Server and its persistent volume stay available for the next launch.
+
+## Automatic database setup
+
+`Backend/DatabaseInitializer.cs` uses only raw ADO.NET (`Microsoft.Data.SqlClient`):
+
+1. Honors `ConnectionStrings__DefaultConnection` if explicitly set. Otherwise tries the configured connection, Windows LocalDB/SQL Express, and the local TCP endpoint.
+2. Connects to `master` and creates **MovieTheaterBooking** if missing. An explicit connection string can select a different database. The login needs permission to create the database on first launch; an existing database needs the schema/procedure permissions used by setup.
+3. Checks all seven project tables and whether managed data exists.
+4. For a new or empty project database, runs `Tables.sql`, `Procedures.sql`, and `Data.sql` in order, splitting standalone `GO` batch separators.
+5. On later launches, preserves all rows and refreshes the 24 procedures with `CREATE OR ALTER`. Prints each table's row count and a completion message.
+
+A populated database with missing tables or old timestamp columns is **never automatically reset**. Setup stops with instructions to choose a fresh database or migrate the existing schema. This also protects previous versions using `MovieTheaterDB`. Automatic initialization is not a general schema migration system. Start only one backend instance per database during first-run setup.
+
+`AutoInitializeDatabase` defaults to `true` in `Backend/appsettings.json`. To use an already provisioned database without automatic SQL execution, set `AutoInitializeDatabase=false` in the environment or configuration. With initialization disabled, provide a correct connection string yourself.
+
+The three SQL scripts are copied into backend build/publish output, so published startup also has the scripts it needs. A single backend connection is selected at startup and used by all controllers.
+
+## SQL Server options and credentials
+
+The launchers create **cis560-movie-booking-sql** using the official SQL Server 2022 Developer image, with physical data in Docker volume **cis560-movie-booking-data**. Port 1433 is published only on `127.0.0.1`. On Apple Silicon, the image uses x86-64 emulation; Docker must support it. Running the launcher to create this container accepts the SQL Server image's EULA; Developer Edition is for development/classroom use.
+
+The public local-demo password is `Cinema560!LocalDemo2026`. It matches `appsettings.json`; it is not a production credential. You can set `MSSQL_SA_PASSWORD` before creating the launcher-managed container to choose a different password. The container keeps its original password with its volume, so continue using that same value on later launches.
+
+For an existing server with other credentials, set the complete connection string before running the launcher. The launcher will not start local Docker when this override is present:
+
+```sh
+export ConnectionStrings__DefaultConnection='Server=localhost,1433;Database=MovieTheaterBooking;User Id=sa;Password=YOUR_PASSWORD;Encrypt=True;TrustServerCertificate=True;Connect Timeout=5;'
+./start.sh
+```
+
+Windows Command Prompt:
+
+```bat
+set "ConnectionStrings__DefaultConnection=Server=(localdb)\MSSQLLocalDB;Database=MovieTheaterBooking;Integrated Security=True;Encrypt=True;TrustServerCertificate=True;"
+start.bat
+```
+
+You may also use an untracked `Backend/appsettings.Development.json` override when running the backend directly. Environment connection overrides are authoritative: setup never silently switches away from them. The startup logs omit passwords and full connection strings.
+
+If port 1433 is already occupied, the launchers leave that server alone. Supply its credentials if they differ from the local-demo defaults. The launchers automatically select a free backend port from 5000–5010 and frontend port from 5173–5183, passing `BackendUrl` to ASP.NET and `VITE_API_BASE_URL` to Vite. This handles macOS AirPlay using port 5000 without changing system settings. Check the printed URLs; other applications are left running.
+
+## Required submission files
+
+- `Database/Tables.sql`: seven relations and named PK/FK/UNIQUE/CHECK/DEFAULT constraints; seeds the six static age-rating codes. **Manual execution drops existing project tables/data.**
+- `Database/Procedures.sql`: 20 managed-table operations and four parameterized aggregation reports.
+- `Database/Data.sql`: deterministic demo data, relative screening dates, and transactional integrity/count checks; requires empty managed tables.
+- `Backend/`: ASP.NET Core .NET 8 Web API, raw ADO.NET controllers/models, startup initializer, and configuration.
+- `Frontend/`: React/JavaScript + Vite, one readable CSS stylesheet, customer portal, and admin views.
+- `README.md`: startup, setup, behavior, and submission guide.
+- `start.sh` and `start.bat`: include both launchers in the submission so another machine can start the project.
+
+For a source submission zip, include the files above and `Frontend/package-lock.json`. Exclude `.git/`, `node_modules/`, `dist/`, `bin/`, `obj/`, local configuration overrides, and Docker volumes. Never include `.mdf`, `.ldf`, or `.ndf` files. No ORM, authentication framework, Redux, TypeScript, or Tailwind is used.
+
+## Exact first-run seed counts
+
+| Relation | Rows |
+| --- | ---: |
+| AgeRating | 6 |
+| Movie | 110 |
+| ScreenRoom | 10 |
+| Customer | 120 |
+| Showtime | 300 |
+| Booking | 6,368 |
+| Review | 220 |
+| **Total** | **7,134** |
+
+Real movie titles and fictional names/contact details support a class demo. Parties contain 1–8 tickets. Premium rooms and popular titles have roughly 65–95% occupancy; other screenings have 15–45%. Twenty-five rating-matched review sentences and varied movie descriptions avoid numbered placeholders. Schedule-day math and named-room ordering keep row counts reproducible even though dates are relative to the day of initialization.
+
+Some movies, customers, and a room begin inactive. Affected screenings are cancelled while retaining their booking history. SQL records nullable `DeactivatedOn`/`CancelledOn` timestamps, preserves the first timestamp on repeated status changes, and clears it on restoration. The UI displays available history without extra timestamp inputs.
+
+## Run components manually
+
+With SQL Server running, use two terminals at the repository root:
+
+```sh
 dotnet run --project Backend/Backend.csproj
 ```
 
-The API listens at **http://localhost:5000**. Open **http://localhost:5000/swagger** to explore request bodies and test endpoints. CORS accepts any origin, method, and header for the classroom React frontend.
-
-## API routes
-
-JSON uses camelCase (`movieId`, `screenRoomId`, `isActive`). Query dates use `yyyy-MM-dd`; showtime timestamps use theater local time, such as `2026-11-20T18:30:00`.
-
-| Resource | Read | Create | Update | Delete |
-| --- | --- | --- | --- | --- |
-| Movies | `GET /api/movies?title=...&genre=...&ageRating=...&includeInactive=false` | `POST /api/movies` | `PUT /api/movies/{id}` | Set `isActive=false` through PUT |
-| Screen rooms | `GET /api/screenrooms?includeInactive=false` | `POST /api/screenrooms` | `PUT /api/screenrooms/{id}` | Set `isActive=false` through PUT |
-| Showtimes | `GET /api/showtimes?movieId=1&firstDate=2026-11-01&lastDate=2026-11-30&includeCancelled=false` | `POST /api/showtimes` | `PUT /api/showtimes/{id}` | Set `isCancelled=true` through PUT |
-| Customers | `GET /api/customers?includeInactive=false` | `POST /api/customers` | `PUT /api/customers/{id}` | Set `isActive=false` through PUT |
-| Bookings | `GET /api/bookings?customerId=1` (required filter) | `POST /api/bookings` | `PUT /api/bookings/{id}` | `DELETE /api/bookings/{id}` |
-| Reviews | `GET /api/reviews?movieId=1` (required filter) | `POST /api/reviews` | `PUT /api/reviews/{id}` | `DELETE /api/reviews/{id}` |
-
-PUT sends a full replacement body for movies, rooms, showtimes, customers, and reviews. Include all editable fields, including the desired `isActive` or `isCancelled` flag. Booking PUT accepts only `numberOfTickets`; it preserves the original customer and showtime. IDs for updates come from the route. Swagger lists every request property and its validation limits.
-
-Example booking creation body:
-
-```json
-{ "customerId": 1, "showtimeId": 1, "numberOfTickets": 2 }
+```sh
+npm ci --prefix Frontend
+npm run dev --prefix Frontend
 ```
 
-Example ticket count update body:
+Backend startup performs the same automatic initialization as the launchers. The project targets .NET 8 and permits a newer installed runtime through `RollForward=LatestMajor`. Manual startup defaults to frontend port 5173 and backend port 5000. If those ports are occupied, prefer the launchers, which select matching free ports automatically. For manual custom ports, set `BackendUrl` for ASP.NET and `VITE_API_BASE_URL` for Vite to the same backend URL (append `/api` for Vite).
 
-```json
-{ "numberOfTickets": 3 }
+To verify builds:
+
+```sh
+dotnet build Backend/Backend.csproj
+npm run build --prefix Frontend
 ```
 
-SQL calculates totals, checks room capacity, rejects cancelled screenings, and prevents overlapping screenings. Unique constraints reject a second booking for the same customer/showtime or a second review for the same customer/movie; use PUT to edit the existing record. Existing booking prices remain historical when showtime prices change; editing a booking recalculates its total at the current price.
+For a manual database reset, deliberately select a disposable database and run `Tables.sql`, `Procedures.sql`, then `Data.sql`. This deletes existing project data. Normal startup and re-launches do not require a reset. Dates remain as originally seeded on subsequent starts; schedule new screenings through the UI when the original schedule becomes historical.
 
-Creates return HTTP 201 and the generated identifier, updates return HTTP 200 and the saved identifier, deletes return HTTP 204, and reads return HTTP 200 with an array. SQL exceptions return HTTP 400 with `{ "error": "the original SQL error message" }`. Request validation failures return HTTP 400 with ASP.NET Core validation details under `errors`.
+## API and UI functionality
 
-## Reports
+All JSON uses camelCase. Dates use `yyyy-MM-dd`; screening times are theater-local values with no UTC conversion.
 
-| GET endpoint | Parameters | Meaning |
+| Resource | Read/create/update | Removal |
 | --- | --- | --- |
-| `/api/reports/movie-performance` | Required `firstDate`, `lastDate` | Non-cancelled screenings by screening date; revenue and average ticket sales |
-| `/api/reports/customer-booking-activity` | Required `firstDate`, `lastDate` | Bookings by booking date; spending and tied spending ranks |
-| `/api/reports/screen-room-utilization` | Required `firstDate`, `lastDate` | Non-cancelled screenings by screening date; offered seats and occupancy percentage |
-| `/api/reports/movie-review-summary` | Optional `minimumReviewCount` (default 0) | Counts and ratings for movies meeting the minimum number of reviews |
+| Movies | GET/POST `/api/movies`, PUT `/api/movies/{id}` | PUT `isActive=false` |
+| Screen rooms | GET/POST `/api/screenrooms`, PUT `/api/screenrooms/{id}` | PUT `isActive=false` |
+| Customers | GET/POST `/api/customers`, PUT `/api/customers/{id}` | PUT `isActive=false` |
+| Showtimes | GET/POST `/api/showtimes`, PUT `/api/showtimes/{id}` | PUT `isCancelled=true` |
+| Bookings | GET `/api/bookings?customerId=...`, POST `/api/bookings`, PUT `/api/bookings/{id}` | DELETE `/api/bookings/{id}` |
+| Reviews | GET `/api/reviews?movieId=...`, POST `/api/reviews`, PUT `/api/reviews/{id}` | DELETE `/api/reviews/{id}` |
 
-Date ranges include both endpoints. Movies without reviews have null average/highest/lowest ratings when `minimumReviewCount=0`.
+PUT replaces editable fields; booking PUT accepts only `numberOfTickets`. SQL computes booking totals, prevents overlaps/overbooking, and rejects inactive participants and common duplicates with friendly messages. Existing prices remain historical until a booking is edited, when its full total is recalculated at the current ticket price. Cancellation preserves booking history until a booking is explicitly deleted.
 
+Select an active customer in the top bar and use **Manage customers** for create/edit/deactivate/reactivate. **Browse movies** offers title/genre/rating filters, upcoming screenings, booking, and review management. **My bookings** edits ticket counts or cancels reservations. Admin **Movies & rooms** and **Showtimes** manage catalog/scheduling/status changes. The mode switch is for the class demo and does not implement login.
 
-## Run the frontend
+Forms use names/dropdowns, date inputs, star-rating choices, and checkboxes rather than raw foreign-key entry. Surrogate IDs are shown only in the four required report tables. SQL and ASP.NET validation errors appear in red accessible banners; successful changes appear in green.
 
-Use Node.js 22.12+ or a newer supported release (this machine has Node.js 24). Open a **second terminal** while the backend stays running at port 5000. From the repository root:
+## Four aggregation reports
 
-```sh
-cd Frontend
-npm install
-npm run dev
-```
+Each report joins multiple tables, uses `GROUP BY`, and accepts SQL parameters through ADO.NET.
 
-Open **http://localhost:5173**. Vite uses a strict port so another application on port 5173 must be stopped before starting it. The frontend's only runtime dependencies are React and React DOM; Vite and its React plugin are development tools. The committed lockfile records the installed dependency versions.
+| Procedure / `/api/reports/` suffix | Parameters | Output columns |
+| --- | --- | --- |
+| `usp_Report_MoviePerformance` / `movie-performance` | `FirstDate`, `LastDate` | MovieID, Title, ShowtimeCount, TicketsSold, TotalRevenue, AverageTicketsPerShowtime |
+| `usp_Report_CustomerBookingActivity` / `customer-booking-activity` | `FirstDate`, `LastDate` | CustomerID, CustomerName, BookingCount, TicketsPurchased, TotalSpent, SpendingRank |
+| `usp_Report_ScreenRoomUtilization` / `screen-room-utilization` | `FirstDate`, `LastDate` | ScreenRoomID, RoomNumber, ShowtimeCount, TicketsBooked, SeatsOffered, OccupancyRate |
+| `usp_Report_MovieReviewSummary` / `movie-review-summary` | `MinimumReviewCount` | MovieID, Title, ReviewCount, AverageRating, HighestRating, LowestRating |
 
-`Frontend/src/api.js` centralizes fetch calls to `http://localhost:5000/api`. There is no proxy or frontend environment-variable setup. Start SQL Server, the backend, and the frontend in that order. SQL errors appear in red banners; ASP.NET validation errors are also extracted and displayed. Successful changes appear in green banners.
-
-To verify/package the frontend:
-
-```sh
-cd Frontend
-npm run build
-npm run preview
-```
-
-The build writes `Frontend/dist/` (ignored by Git). Preview serves the production build at **http://localhost:4173** and still requires the backend and database.
-
-## Use the six-view interface
-
-1. **Top navigation / customer accounts:** select an active customer. Choose **Manage customers** to create one, edit a customer's details, deactivate them with the Active customer checkbox, or select an inactive account and reactivate it. Deactivation preserves bookings and reviews. Mode switching is for the class demo and does not implement authentication.
-2. **Customer Portal → Browse movies:** search by title, exact genre, or rating. Select a movie to see upcoming screenings, screen type, room, price, and seats remaining. Book for the selected customer. Read audience reviews and their average rating; create, update, or delete the selected customer's review.
-3. **Customer Portal → My bookings:** change ticket quantities or cancel a booking. The confirmed total comes from SQL; editing recalculates the full total at the screening's current price. Screening cancellations are clearly marked.
-4. **Admin Dashboard → Movies & rooms:** use the two sub-tabs to create/edit movies and rooms, or deactivate/reactivate existing records. Inactive records remain visible to administrators.
-5. **Admin Dashboard → Showtimes:** schedule a screening, edit its movie/room/time/price, cancel it, or restore it. Red banners display SQL's exact runtime-overlap/capacity message. The date filter defaults to 30 days ago and can be cleared to show all records.
-6. **Admin Dashboard → Reports:** select one of the four report tabs. Dates default to 60 days before/after today to cover the seed's bookings and screenings. Review reports default to at least one review. Use **Run report** after editing filters. Tables include their applied dates/threshold, clear headings, currency formatting, ranks, and occupancy percentages for screenshots. Browser printing hides the navigation and filters.
-
-Upcoming screenings use theater local time and exclude screenings that have already started. The showtime API does not include screen type, so React matches its `screenRoomId` to the room catalog. All requests use the existing API's camelCase fields; SQL remains the authority for overlaps, capacities, prices, and uniqueness.
-
-## Troubleshooting
-
-- **Cannot reach the cinema API:** start `dotnet run --project Backend/Backend.csproj` and verify `http://localhost:5000/swagger` loads. Confirm port 5000 is free.
-- **SQL login/network error:** replace the placeholder connection string with your reachable SQL Server instance and credentials; ensure the three scripts ran against that same database. The frontend can load without SQL Server, but database actions need a working connection.
-- **No upcoming screenings:** the seed dates are relative to the day `Data.sql` was run. Schedule a future screening in Admin Showtimes, or deliberately reset/reseed the database if disposable demo data is all you need.
-- **Duplicate booking/review:** update the existing record in My bookings/the movie's review form rather than submitting a second one.
-- **Overlap or room capacity error:** adjust the screening time, movie runtime, room, or requested ticket count. The banner preserves the database's original explanation.
+Date ranges include both endpoints. Performance/utilization use non-cancelled screening dates; customer activity uses booking dates and includes retained bookings on cancelled screenings. Ranking uses `RANK`; review thresholds use `HAVING`. With a minimum review count of zero, movies without reviews have null rating statistics. Report tables include applied filters and formatted currency/percentages for screenshots.

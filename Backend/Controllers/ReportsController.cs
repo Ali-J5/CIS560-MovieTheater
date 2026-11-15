@@ -183,7 +183,7 @@ public class ReportsController : ControllerBase
 
             // Step 3: Bind values separately from SQL text to prevent SQL injection.
             // Explicit SQL types and lengths match the procedure; DBNull.Value represents SQL NULL.
-            cmd.Parameters.Add("@MinimumReviewCount", SqlDbType.Int).Value = (object?)(minimumReviewCount) ?? DBNull.Value;
+            cmd.Parameters.Add("@MinimumReviewCount", SqlDbType.Int).Value = minimumReviewCount;
 
             // Step 4: Execute the procedure and read each result row into a plain C# object.
             var results = new List<MovieReviewSummaryResult>();

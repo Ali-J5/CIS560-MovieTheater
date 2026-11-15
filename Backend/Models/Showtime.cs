@@ -8,7 +8,7 @@ public class Showtime
     // ShowtimeID: generated row identifier.
     public int ShowtimeId { get; set; }
 
-    // MovieID: generated row identifier.
+    // MovieID: foreign key identifying the related Movie row.
     public int MovieId { get; set; }
 
     // Title: value read from the matching SQL result column.
@@ -17,7 +17,7 @@ public class Showtime
     // RuntimeMinutes: value read from the matching SQL result column.
     public int RuntimeMinutes { get; set; }
 
-    // ScreenRoomID: generated row identifier.
+    // ScreenRoomID: foreign key identifying the related ScreenRoom row.
     public int ScreenRoomId { get; set; }
 
     // RoomNumber: value read from the matching SQL result column.
@@ -43,6 +43,9 @@ public class Showtime
 
     // Live capacity minus tickets sold; SQL BIGINT maps to C# long.
     public long RemainingSeats { get; set; }
+
+    // Database-managed status change time; null while the screening is not cancelled.
+    public DateTime? CancelledOn { get; set; }
 }
 
 // JSON body for create/full-replacement update requests.

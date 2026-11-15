@@ -3,7 +3,7 @@ namespace Backend.Models;
 // Response fields map explicitly to the stored procedure result columns.
 public class MoviePerformanceResult
 {
-    // MovieID: generated row identifier.
+    // MovieID: identifies the movie summarized by this report.
     public int MovieId { get; set; }
 
     // Title: value read from the matching SQL result column.
@@ -25,7 +25,7 @@ public class MoviePerformanceResult
 // Response fields map explicitly to the stored procedure result columns.
 public class CustomerBookingActivityResult
 {
-    // CustomerID: generated row identifier.
+    // CustomerID: identifies the customer summarized by this report.
     public int CustomerId { get; set; }
 
     // CustomerName: value read from the matching SQL result column.
@@ -47,7 +47,7 @@ public class CustomerBookingActivityResult
 // Response fields map explicitly to the stored procedure result columns.
 public class ScreenRoomUtilizationResult
 {
-    // ScreenRoomID: generated row identifier.
+    // ScreenRoomID: identifies the room summarized by this report.
     public int ScreenRoomId { get; set; }
 
     // RoomNumber: value read from the matching SQL result column.
@@ -69,7 +69,7 @@ public class ScreenRoomUtilizationResult
 // Response fields map explicitly to the stored procedure result columns.
 public class MovieReviewSummaryResult
 {
-    // MovieID: generated row identifier.
+    // MovieID: identifies the movie summarized by this report.
     public int MovieId { get; set; }
 
     // Title: value read from the matching SQL result column.

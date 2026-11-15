@@ -8,10 +8,10 @@ public class Booking
     // BookingID: generated row identifier.
     public int BookingId { get; set; }
 
-    // CustomerID: generated row identifier.
+    // CustomerID: foreign key identifying the related Customer row.
     public int CustomerId { get; set; }
 
-    // ShowtimeID: generated row identifier.
+    // ShowtimeID: foreign key identifying the related Showtime row.
     public int ShowtimeId { get; set; }
 
     // Database-generated local date and time when the booking was created.
@@ -23,7 +23,7 @@ public class Booking
     // Stored historical total, calculated by SQL rather than supplied by the client.
     public decimal TotalPrice { get; set; }
 
-    // MovieID: generated row identifier.
+    // MovieID: foreign key identifying the related Movie row.
     public int MovieId { get; set; }
 
     // Title: value read from the matching SQL result column.
@@ -38,7 +38,7 @@ public class Booking
     // True cancels the screening while retaining its bookings and history.
     public bool IsCancelled { get; set; }
 
-    // ScreenRoomID: generated row identifier.
+    // ScreenRoomID: foreign key identifying the related ScreenRoom row.
     public int ScreenRoomId { get; set; }
 
     // RoomNumber: value read from the matching SQL result column.
@@ -48,7 +48,7 @@ public class Booking
     public string RoomName { get; set; } = string.Empty;
 }
 
-// JSON body for create/full-replacement update requests.
+// JSON body for creating a reservation.
 public class BookingRequest
 {
     // CustomerID: value sent to the stored procedure.
@@ -64,7 +64,7 @@ public class BookingRequest
     public int NumberOfTickets { get; set; }
 }
 
-// JSON body for create/full-replacement update requests.
+// JSON body for replacing only the ticket count of an existing reservation.
 public class BookingUpdateRequest
 {
     // NumberOfTickets: value sent to the stored procedure.

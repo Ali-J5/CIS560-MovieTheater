@@ -1,6 +1,8 @@
 -- Run after Tables.sql. Execute each GO-delimited batch with SSMS or sqlcmd.
 -- Call these procedures from parameterized ADO.NET commands; direct table writes bypass rules.
 -- Dates use server local time. Report date ranges include both endpoints.
+-- UPDLOCK reserves rows for a possible update; HOLDLOCK also protects matching key ranges.
+-- These validation locks last until COMMIT/ROLLBACK, preventing competing check/write races.
 -- Updates are full replacements: callers supply every editable field.
 -- Prices on existing bookings remain historical if a showtime price changes;
 -- editing a booking recalculates its entire total using the current ticket price.
@@ -25,7 +27,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     -- Apply each supplied filter independently; order results for the UI.
-    SELECT MovieID, Title, ReleaseDate, Genre, RuntimeMinutes, AgeRating, Description, IsActive
+    SELECT MovieID, Title, ReleaseDate, Genre, RuntimeMinutes, AgeRating, Description, IsActive, DeactivatedOn
     FROM dbo.Movie
     WHERE (@IncludeInactive = 1 OR IsActive = 1)
       AND (@Title IS NULL OR Title LIKE N'%' + @Title + N'%')
@@ -46,7 +48,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     -- Hide inactive records by default.
-    SELECT ScreenRoomID, RoomNumber, Name, ScreenType, Capacity, IsActive
+    SELECT ScreenRoomID, RoomNumber, Name, ScreenType, Capacity, IsActive, DeactivatedOn
     FROM dbo.ScreenRoom
     WHERE @IncludeInactive = 1 OR IsActive = 1
     ORDER BY ScreenRoomID;
@@ -64,7 +66,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     -- Hide inactive records by default.
-    SELECT CustomerID, Email, PhoneNumber, FirstName, LastName, IsActive
+    SELECT CustomerID, Email, PhoneNumber, FirstName, LastName, IsActive, DeactivatedOn
     FROM dbo.Customer
     WHERE @IncludeInactive = 1 OR IsActive = 1
     ORDER BY CustomerID;
@@ -72,7 +74,7 @@ END;
 GO
 
 /*
-Insert a Movie record; unique constraints reject duplicate natural keys.
+Insert a Movie record; friendly checks explain duplicate values before UNIQUE constraints act as safeguards.
 Parameters:
   @Title NVARCHAR(200), -- Value for the new record.
   @ReleaseDate DATE, -- Value for the new record.
@@ -95,31 +97,35 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
     BEGIN TRY
-        -- Make the validation and write atomic, including concurrent API requests.
+        -- Commit validation and the write together; failures roll back the transaction.
         BEGIN TRANSACTION;
-        DECLARE @LockResult INT;
-        EXEC @LockResult = sys.sp_getapplock
-            @Resource = N'MovieTheaterBusinessRules', @LockMode = 'Exclusive',
-            @LockOwner = 'Transaction', @LockTimeout = 10000;
-        IF @LockResult < 0
-            THROW 50003, 'Could not obtain the theater write lock. Retry the operation.', 1;
+        -- Validate numeric ranges before writing the row.
+        IF @RuntimeMinutes IS NULL OR @RuntimeMinutes <= 0
+            THROW 50005, 'Movie runtime must be greater than zero minutes.', 1;
+
+        -- Explain common input mistakes before constraints act as the final safeguard.
+        IF EXISTS (SELECT 1 FROM dbo.Movie WITH (UPDLOCK, HOLDLOCK) WHERE Title = @Title AND ReleaseDate = @ReleaseDate)
+            THROW 50007, 'This movie release is already in the catalog.', 1;
+        IF NOT EXISTS (SELECT 1 FROM dbo.AgeRating WITH (UPDLOCK, HOLDLOCK) WHERE AgeRating = @AgeRating)
+            THROW 50007, 'Choose a supported age rating.', 1;
+
         -- Write the supplied fields; constraints validate references and values.
-        INSERT dbo.Movie (Title, ReleaseDate, Genre, RuntimeMinutes, AgeRating, Description, IsActive)
-        VALUES (@Title, @ReleaseDate, @Genre, @RuntimeMinutes, @AgeRating, @Description, @IsActive);
+        INSERT dbo.Movie (Title, ReleaseDate, Genre, RuntimeMinutes, AgeRating, Description, IsActive, DeactivatedOn)
+        VALUES (@Title, @ReleaseDate, @Genre, @RuntimeMinutes, @AgeRating, @Description, @IsActive, CASE WHEN @IsActive = 0 THEN SYSDATETIME() ELSE NULL END);
         -- Return the generated identifier to the backend.
         SELECT CONVERT(INT, SCOPE_IDENTITY()) AS MovieID;
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH
         -- Roll back failed writes, then preserve the original SQL error for ADO.NET.
-        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
         THROW;
     END CATCH;
 END;
 GO
 
 /*
-Update a Movie record; unique constraints reject duplicate natural keys.
+Update a Movie record; friendly checks explain duplicate values before UNIQUE constraints act as safeguards.
 Parameters:
   @MovieID INT, -- Record to edit.
   @Title NVARCHAR(200), -- Replacement value.
@@ -144,44 +150,50 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
     BEGIN TRY
-        -- Make the validation and write atomic, including concurrent API requests.
+        -- Commit validation and the write together; failures roll back the transaction.
         BEGIN TRANSACTION;
-        DECLARE @LockResult INT;
-        EXEC @LockResult = sys.sp_getapplock
-            @Resource = N'MovieTheaterBusinessRules', @LockMode = 'Exclusive',
-            @LockOwner = 'Transaction', @LockTimeout = 10000;
-        IF @LockResult < 0
-            THROW 50003, 'Could not obtain the theater write lock. Retry the operation.', 1;
+        -- Validate numeric ranges before writing the row.
+        IF @RuntimeMinutes IS NULL OR @RuntimeMinutes <= 0
+            THROW 50005, 'Movie runtime must be greater than zero minutes.', 1;
+
+        -- Explain common input mistakes before constraints act as the final safeguard.
+        IF EXISTS (SELECT 1 FROM dbo.Movie WITH (UPDLOCK, HOLDLOCK) WHERE Title = @Title AND ReleaseDate = @ReleaseDate AND MovieID <> @MovieID)
+            THROW 50007, 'This movie release is already in the catalog.', 1;
+        IF NOT EXISTS (SELECT 1 FROM dbo.AgeRating WITH (UPDLOCK, HOLDLOCK) WHERE AgeRating = @AgeRating)
+            THROW 50007, 'Choose a supported age rating.', 1;
+
         -- Reject unknown identifiers instead of silently updating zero rows.
-        IF NOT EXISTS (SELECT 1 FROM dbo.Movie WHERE MovieID = @MovieID)
+        IF NOT EXISTS (SELECT 1 FROM dbo.Movie WITH (UPDLOCK, HOLDLOCK) WHERE MovieID = @MovieID)
             THROW 50004, 'Movie was not found.', 1;
         -- A runtime edit must not make any existing active screening overlap its neighbor.
         IF EXISTS (
-            SELECT 1 FROM dbo.Showtime a
-            JOIN dbo.Showtime b ON a.ScreenRoomID = b.ScreenRoomID AND a.ShowtimeID < b.ShowtimeID
-            JOIN dbo.Movie ma ON ma.MovieID = a.MovieID
-            JOIN dbo.Movie mb ON mb.MovieID = b.MovieID
+            SELECT 1 FROM dbo.Showtime a WITH (UPDLOCK, HOLDLOCK)
+            JOIN dbo.Showtime b WITH (UPDLOCK, HOLDLOCK) ON a.ScreenRoomID = b.ScreenRoomID AND a.ShowtimeID < b.ShowtimeID
+            JOIN dbo.Movie ma WITH (UPDLOCK, HOLDLOCK) ON ma.MovieID = a.MovieID
+            JOIN dbo.Movie mb WITH (UPDLOCK, HOLDLOCK) ON mb.MovieID = b.MovieID
             WHERE a.IsCancelled = 0 AND b.IsCancelled = 0
               AND (a.MovieID = @MovieID OR b.MovieID = @MovieID)
               AND a.StartDateTime < DATEADD(MINUTE, CASE WHEN b.MovieID = @MovieID THEN @RuntimeMinutes ELSE mb.RuntimeMinutes END, b.StartDateTime)
               AND b.StartDateTime < DATEADD(MINUTE, CASE WHEN a.MovieID = @MovieID THEN @RuntimeMinutes ELSE ma.RuntimeMinutes END, a.StartDateTime))
             THROW 50001, 'Runtime change would overlap scheduled movies in a room.', 1;
         -- Replace editable fields; soft-delete by passing IsActive = 0.
-        UPDATE dbo.Movie SET Title = @Title, ReleaseDate = @ReleaseDate, Genre = @Genre, RuntimeMinutes = @RuntimeMinutes, AgeRating = @AgeRating, Description = @Description, IsActive = @IsActive
+        UPDATE dbo.Movie SET Title = @Title, ReleaseDate = @ReleaseDate, Genre = @Genre, RuntimeMinutes = @RuntimeMinutes, AgeRating = @AgeRating, Description = @Description, IsActive = @IsActive,
+            -- Retain the original timestamp on repeated deactivation; clear it on restoration.
+            DeactivatedOn = CASE WHEN @IsActive = 0 THEN COALESCE(DeactivatedOn, SYSDATETIME()) ELSE NULL END
         WHERE MovieID = @MovieID;
         SELECT @MovieID AS MovieID;
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH
         -- Roll back failed writes, then preserve the original SQL error for ADO.NET.
-        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
         THROW;
     END CATCH;
 END;
 GO
 
 /*
-Insert a ScreenRoom record; unique constraints reject duplicate natural keys.
+Insert a ScreenRoom record; friendly checks explain duplicate values before UNIQUE constraints act as safeguards.
 Parameters:
   @RoomNumber NVARCHAR(100), -- Value for the new record.
   @Name NVARCHAR(100), -- Value for the new record.
@@ -200,31 +212,33 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
     BEGIN TRY
-        -- Make the validation and write atomic, including concurrent API requests.
+        -- Commit validation and the write together; failures roll back the transaction.
         BEGIN TRANSACTION;
-        DECLARE @LockResult INT;
-        EXEC @LockResult = sys.sp_getapplock
-            @Resource = N'MovieTheaterBusinessRules', @LockMode = 'Exclusive',
-            @LockOwner = 'Transaction', @LockTimeout = 10000;
-        IF @LockResult < 0
-            THROW 50003, 'Could not obtain the theater write lock. Retry the operation.', 1;
+        -- Validate numeric ranges before writing the row.
+        IF @Capacity IS NULL OR @Capacity <= 0
+            THROW 50005, 'Room capacity must be greater than zero.', 1;
+
+        -- Explain common input mistakes before constraints act as the final safeguard.
+        IF EXISTS (SELECT 1 FROM dbo.ScreenRoom WITH (UPDLOCK, HOLDLOCK) WHERE RoomNumber = @RoomNumber)
+            THROW 50007, 'That room number already exists.', 1;
+
         -- Write the supplied fields; constraints validate references and values.
-        INSERT dbo.ScreenRoom (RoomNumber, Name, ScreenType, Capacity, IsActive)
-        VALUES (@RoomNumber, @Name, @ScreenType, @Capacity, @IsActive);
+        INSERT dbo.ScreenRoom (RoomNumber, Name, ScreenType, Capacity, IsActive, DeactivatedOn)
+        VALUES (@RoomNumber, @Name, @ScreenType, @Capacity, @IsActive, CASE WHEN @IsActive = 0 THEN SYSDATETIME() ELSE NULL END);
         -- Return the generated identifier to the backend.
         SELECT CONVERT(INT, SCOPE_IDENTITY()) AS ScreenRoomID;
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH
         -- Roll back failed writes, then preserve the original SQL error for ADO.NET.
-        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
         THROW;
     END CATCH;
 END;
 GO
 
 /*
-Update a ScreenRoom record; unique constraints reject duplicate natural keys.
+Update a ScreenRoom record; friendly checks explain duplicate values before UNIQUE constraints act as safeguards.
 Parameters:
   @ScreenRoomID INT, -- Record to edit.
   @RoomNumber NVARCHAR(100), -- Replacement value.
@@ -245,38 +259,42 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
     BEGIN TRY
-        -- Make the validation and write atomic, including concurrent API requests.
+        -- Commit validation and the write together; failures roll back the transaction.
         BEGIN TRANSACTION;
-        DECLARE @LockResult INT;
-        EXEC @LockResult = sys.sp_getapplock
-            @Resource = N'MovieTheaterBusinessRules', @LockMode = 'Exclusive',
-            @LockOwner = 'Transaction', @LockTimeout = 10000;
-        IF @LockResult < 0
-            THROW 50003, 'Could not obtain the theater write lock. Retry the operation.', 1;
+        -- Validate numeric ranges before writing the row.
+        IF @Capacity IS NULL OR @Capacity <= 0
+            THROW 50005, 'Room capacity must be greater than zero.', 1;
+
+        -- Explain common input mistakes before constraints act as the final safeguard.
+        IF EXISTS (SELECT 1 FROM dbo.ScreenRoom WITH (UPDLOCK, HOLDLOCK) WHERE RoomNumber = @RoomNumber AND ScreenRoomID <> @ScreenRoomID)
+            THROW 50007, 'That room number already exists.', 1;
+
         -- Reject unknown identifiers instead of silently updating zero rows.
-        IF NOT EXISTS (SELECT 1 FROM dbo.ScreenRoom WHERE ScreenRoomID = @ScreenRoomID)
+        IF NOT EXISTS (SELECT 1 FROM dbo.ScreenRoom WITH (UPDLOCK, HOLDLOCK) WHERE ScreenRoomID = @ScreenRoomID)
             THROW 50004, 'ScreenRoom was not found.', 1;
         -- Reducing capacity cannot strand tickets already booked for any screening.
-        IF EXISTS (SELECT 1 FROM dbo.Showtime s JOIN dbo.Booking b ON b.ShowtimeID = s.ShowtimeID
+        IF EXISTS (SELECT 1 FROM dbo.Showtime s WITH (UPDLOCK, HOLDLOCK) JOIN dbo.Booking b WITH (UPDLOCK, HOLDLOCK) ON b.ShowtimeID = s.ShowtimeID
             WHERE s.ScreenRoomID = @ScreenRoomID GROUP BY s.ShowtimeID
             HAVING SUM(CONVERT(BIGINT, b.NumberOfTickets)) > @Capacity)
             THROW 50002, 'Room capacity cannot be less than tickets already booked.', 1;
         -- Replace editable fields; soft-delete by passing IsActive = 0.
-        UPDATE dbo.ScreenRoom SET RoomNumber = @RoomNumber, Name = @Name, ScreenType = @ScreenType, Capacity = @Capacity, IsActive = @IsActive
+        UPDATE dbo.ScreenRoom SET RoomNumber = @RoomNumber, Name = @Name, ScreenType = @ScreenType, Capacity = @Capacity, IsActive = @IsActive,
+            -- Retain the original timestamp on repeated deactivation; clear it on restoration.
+            DeactivatedOn = CASE WHEN @IsActive = 0 THEN COALESCE(DeactivatedOn, SYSDATETIME()) ELSE NULL END
         WHERE ScreenRoomID = @ScreenRoomID;
         SELECT @ScreenRoomID AS ScreenRoomID;
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH
         -- Roll back failed writes, then preserve the original SQL error for ADO.NET.
-        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
         THROW;
     END CATCH;
 END;
 GO
 
 /*
-Insert a Customer record; unique constraints reject duplicate natural keys.
+Insert a Customer record; friendly checks explain duplicate values before UNIQUE constraints act as safeguards.
 Parameters:
   @Email NVARCHAR(200), -- Value for the new record.
   @PhoneNumber VARCHAR(25), -- Value for the new record.
@@ -295,31 +313,31 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
     BEGIN TRY
-        -- Make the validation and write atomic, including concurrent API requests.
+        -- Commit validation and the write together; failures roll back the transaction.
         BEGIN TRANSACTION;
-        DECLARE @LockResult INT;
-        EXEC @LockResult = sys.sp_getapplock
-            @Resource = N'MovieTheaterBusinessRules', @LockMode = 'Exclusive',
-            @LockOwner = 'Transaction', @LockTimeout = 10000;
-        IF @LockResult < 0
-            THROW 50003, 'Could not obtain the theater write lock. Retry the operation.', 1;
+        -- Explain common input mistakes before constraints act as the final safeguard.
+        IF EXISTS (SELECT 1 FROM dbo.Customer WITH (UPDLOCK, HOLDLOCK) WHERE Email = @Email)
+            THROW 50007, 'That email address is already used by another customer.', 1;
+        IF EXISTS (SELECT 1 FROM dbo.Customer WITH (UPDLOCK, HOLDLOCK) WHERE PhoneNumber = @PhoneNumber)
+            THROW 50007, 'That phone number is already used by another customer.', 1;
+
         -- Write the supplied fields; constraints validate references and values.
-        INSERT dbo.Customer (Email, PhoneNumber, FirstName, LastName, IsActive)
-        VALUES (@Email, @PhoneNumber, @FirstName, @LastName, @IsActive);
+        INSERT dbo.Customer (Email, PhoneNumber, FirstName, LastName, IsActive, DeactivatedOn)
+        VALUES (@Email, @PhoneNumber, @FirstName, @LastName, @IsActive, CASE WHEN @IsActive = 0 THEN SYSDATETIME() ELSE NULL END);
         -- Return the generated identifier to the backend.
         SELECT CONVERT(INT, SCOPE_IDENTITY()) AS CustomerID;
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH
         -- Roll back failed writes, then preserve the original SQL error for ADO.NET.
-        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
         THROW;
     END CATCH;
 END;
 GO
 
 /*
-Update a Customer record; unique constraints reject duplicate natural keys.
+Update a Customer record; friendly checks explain duplicate values before UNIQUE constraints act as safeguards.
 Parameters:
   @CustomerID INT, -- Record to edit.
   @Email NVARCHAR(200), -- Replacement value.
@@ -340,33 +358,35 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
     BEGIN TRY
-        -- Make the validation and write atomic, including concurrent API requests.
+        -- Commit validation and the write together; failures roll back the transaction.
         BEGIN TRANSACTION;
-        DECLARE @LockResult INT;
-        EXEC @LockResult = sys.sp_getapplock
-            @Resource = N'MovieTheaterBusinessRules', @LockMode = 'Exclusive',
-            @LockOwner = 'Transaction', @LockTimeout = 10000;
-        IF @LockResult < 0
-            THROW 50003, 'Could not obtain the theater write lock. Retry the operation.', 1;
+        -- Explain common input mistakes before constraints act as the final safeguard.
+        IF EXISTS (SELECT 1 FROM dbo.Customer WITH (UPDLOCK, HOLDLOCK) WHERE Email = @Email AND CustomerID <> @CustomerID)
+            THROW 50007, 'That email address is already used by another customer.', 1;
+        IF EXISTS (SELECT 1 FROM dbo.Customer WITH (UPDLOCK, HOLDLOCK) WHERE PhoneNumber = @PhoneNumber AND CustomerID <> @CustomerID)
+            THROW 50007, 'That phone number is already used by another customer.', 1;
+
         -- Reject unknown identifiers instead of silently updating zero rows.
-        IF NOT EXISTS (SELECT 1 FROM dbo.Customer WHERE CustomerID = @CustomerID)
+        IF NOT EXISTS (SELECT 1 FROM dbo.Customer WITH (UPDLOCK, HOLDLOCK) WHERE CustomerID = @CustomerID)
             THROW 50004, 'Customer was not found.', 1;
         -- Replace editable fields; soft-delete by passing IsActive = 0.
-        UPDATE dbo.Customer SET Email = @Email, PhoneNumber = @PhoneNumber, FirstName = @FirstName, LastName = @LastName, IsActive = @IsActive
+        UPDATE dbo.Customer SET Email = @Email, PhoneNumber = @PhoneNumber, FirstName = @FirstName, LastName = @LastName, IsActive = @IsActive,
+            -- Retain the original timestamp on repeated deactivation; clear it on restoration.
+            DeactivatedOn = CASE WHEN @IsActive = 0 THEN COALESCE(DeactivatedOn, SYSDATETIME()) ELSE NULL END
         WHERE CustomerID = @CustomerID;
         SELECT @CustomerID AS CustomerID;
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH
         -- Roll back failed writes, then preserve the original SQL error for ADO.NET.
-        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
         THROW;
     END CATCH;
 END;
 GO
 
 /*
-Insert a Review record; unique constraints reject duplicate natural keys.
+Insert a Review record; friendly checks explain duplicate values before UNIQUE constraints act as safeguards.
 Parameters:
   @CustomerID INT, -- Value for the new record.
   @MovieID INT, -- Value for the new record.
@@ -383,14 +403,18 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
     BEGIN TRY
-        -- Make the validation and write atomic, including concurrent API requests.
+        -- Commit validation and the write together; failures roll back the transaction.
         BEGIN TRANSACTION;
-        DECLARE @LockResult INT;
-        EXEC @LockResult = sys.sp_getapplock
-            @Resource = N'MovieTheaterBusinessRules', @LockMode = 'Exclusive',
-            @LockOwner = 'Transaction', @LockTimeout = 10000;
-        IF @LockResult < 0
-            THROW 50003, 'Could not obtain the theater write lock. Retry the operation.', 1;
+        -- Explain common input mistakes before constraints act as the final safeguard.
+        IF EXISTS (SELECT 1 FROM dbo.Review WITH (UPDLOCK, HOLDLOCK) WHERE CustomerID = @CustomerID AND MovieID = @MovieID)
+            THROW 50007, 'You already reviewed this movie. Edit your existing review instead.', 1;
+        IF NOT EXISTS (SELECT 1 FROM dbo.Customer WITH (UPDLOCK, HOLDLOCK) WHERE CustomerID = @CustomerID AND IsActive = 1)
+            THROW 50007, 'Choose an active customer before reviewing a movie.', 1;
+        IF NOT EXISTS (SELECT 1 FROM dbo.Movie WITH (UPDLOCK, HOLDLOCK) WHERE MovieID = @MovieID AND IsActive = 1)
+            THROW 50007, 'This movie is unavailable for new or updated reviews.', 1;
+        IF @Rating IS NULL OR @Rating NOT BETWEEN 1 AND 5
+            THROW 50007, 'Choose a rating from one to five stars.', 1;
+
         -- Write the supplied fields; constraints validate references and values.
         INSERT dbo.Review (CustomerID, MovieID, Rating, ReviewText)
         VALUES (@CustomerID, @MovieID, @Rating, @ReviewText);
@@ -400,14 +424,14 @@ BEGIN
     END TRY
     BEGIN CATCH
         -- Roll back failed writes, then preserve the original SQL error for ADO.NET.
-        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
         THROW;
     END CATCH;
 END;
 GO
 
 /*
-Update a Review record; unique constraints reject duplicate natural keys.
+Update a Review record; friendly checks explain duplicate values before UNIQUE constraints act as safeguards.
 Parameters:
   @ReviewID INT, -- Record to edit.
   @CustomerID INT, -- Replacement value.
@@ -426,16 +450,20 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
     BEGIN TRY
-        -- Make the validation and write atomic, including concurrent API requests.
+        -- Commit validation and the write together; failures roll back the transaction.
         BEGIN TRANSACTION;
-        DECLARE @LockResult INT;
-        EXEC @LockResult = sys.sp_getapplock
-            @Resource = N'MovieTheaterBusinessRules', @LockMode = 'Exclusive',
-            @LockOwner = 'Transaction', @LockTimeout = 10000;
-        IF @LockResult < 0
-            THROW 50003, 'Could not obtain the theater write lock. Retry the operation.', 1;
+        -- Explain common input mistakes before constraints act as the final safeguard.
+        IF EXISTS (SELECT 1 FROM dbo.Review WITH (UPDLOCK, HOLDLOCK) WHERE CustomerID = @CustomerID AND MovieID = @MovieID AND ReviewID <> @ReviewID)
+            THROW 50007, 'You already reviewed this movie. Edit your existing review instead.', 1;
+        IF NOT EXISTS (SELECT 1 FROM dbo.Customer WITH (UPDLOCK, HOLDLOCK) WHERE CustomerID = @CustomerID AND IsActive = 1)
+            THROW 50007, 'Choose an active customer before reviewing a movie.', 1;
+        IF NOT EXISTS (SELECT 1 FROM dbo.Movie WITH (UPDLOCK, HOLDLOCK) WHERE MovieID = @MovieID AND IsActive = 1)
+            THROW 50007, 'This movie is unavailable for new or updated reviews.', 1;
+        IF @Rating IS NULL OR @Rating NOT BETWEEN 1 AND 5
+            THROW 50007, 'Choose a rating from one to five stars.', 1;
+
         -- Reject unknown identifiers instead of silently updating zero rows.
-        IF NOT EXISTS (SELECT 1 FROM dbo.Review WHERE ReviewID = @ReviewID)
+        IF NOT EXISTS (SELECT 1 FROM dbo.Review WITH (UPDLOCK, HOLDLOCK) WHERE ReviewID = @ReviewID)
             THROW 50004, 'Review was not found.', 1;
         -- Write the supplied fields; constraints validate references and values.
         UPDATE dbo.Review SET CustomerID = @CustomerID, MovieID = @MovieID, Rating = @Rating, ReviewText = @ReviewText
@@ -445,7 +473,7 @@ BEGIN
     END TRY
     BEGIN CATCH
         -- Roll back failed writes, then preserve the original SQL error for ADO.NET.
-        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
         THROW;
     END CATCH;
 END;
@@ -470,7 +498,7 @@ BEGIN
     -- Aggregate bookings first so one screening produces exactly one result row.
     SELECT s.ShowtimeID, s.MovieID, m.Title, m.RuntimeMinutes, s.ScreenRoomID,
         sr.RoomNumber, sr.Name AS RoomName, sr.Capacity AS RoomCapacity,
-        s.StartDateTime, s.TicketPrice, s.IsCancelled,
+        s.StartDateTime, s.TicketPrice, s.IsCancelled, s.CancelledOn,
         COALESCE(b.TicketsSold, 0) AS TicketsSold,
         sr.Capacity - COALESCE(b.TicketsSold, 0) AS RemainingSeats
     FROM dbo.Showtime s
@@ -506,35 +534,39 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
     BEGIN TRY
-        -- Make the validation and write atomic, including concurrent API requests.
+        -- Commit validation and the write together; failures roll back the transaction.
         BEGIN TRANSACTION;
-        DECLARE @LockResult INT;
-        EXEC @LockResult = sys.sp_getapplock
-            @Resource = N'MovieTheaterBusinessRules', @LockMode = 'Exclusive',
-            @LockOwner = 'Transaction', @LockTimeout = 10000;
-        IF @LockResult < 0
-            THROW 50003, 'Could not obtain the theater write lock. Retry the operation.', 1;
+        -- Validate numeric ranges before writing the row.
+        IF @TicketPrice IS NULL OR @TicketPrice < 0
+            THROW 50005, 'Ticket price cannot be negative.', 1;
+
+        -- Explain common input mistakes before constraints act as the final safeguard.
+        IF EXISTS (SELECT 1 FROM dbo.Showtime WITH (UPDLOCK, HOLDLOCK) WHERE ScreenRoomID = @ScreenRoomID AND StartDateTime = @StartDateTime)
+            THROW 50007, 'This room already has a screening at that start time, possibly cancelled. Edit that screening or choose another time.', 1;
+        IF @IsCancelled = 0 AND (NOT EXISTS (SELECT 1 FROM dbo.Movie WITH (UPDLOCK, HOLDLOCK) WHERE MovieID = @MovieID AND IsActive = 1) OR NOT EXISTS (SELECT 1 FROM dbo.ScreenRoom WITH (UPDLOCK, HOLDLOCK) WHERE ScreenRoomID = @ScreenRoomID AND IsActive = 1))
+            THROW 50007, 'Choose an active movie and screening room before scheduling or restoring a screening.', 1;
+
         -- Read the referenced movie and reject missing references with a clear error.
         DECLARE @Runtime INT;
-        SELECT @Runtime = RuntimeMinutes FROM dbo.Movie WHERE MovieID = @MovieID;
-        IF @Runtime IS NULL OR NOT EXISTS (SELECT 1 FROM dbo.ScreenRoom WHERE ScreenRoomID = @ScreenRoomID)
+        SELECT @Runtime = RuntimeMinutes FROM dbo.Movie WITH (UPDLOCK, HOLDLOCK) WHERE MovieID = @MovieID;
+        IF @Runtime IS NULL OR NOT EXISTS (SELECT 1 FROM dbo.ScreenRoom WITH (UPDLOCK, HOLDLOCK) WHERE ScreenRoomID = @ScreenRoomID)
             THROW 50004, 'Movie or screening room was not found.', 1;
         -- Half-open intervals allow the next movie to start exactly when this one ends.
         IF @IsCancelled = 0 AND EXISTS (
-            SELECT 1 FROM dbo.Showtime s JOIN dbo.Movie m ON m.MovieID = s.MovieID
+            SELECT 1 FROM dbo.Showtime s WITH (UPDLOCK, HOLDLOCK) JOIN dbo.Movie m WITH (UPDLOCK, HOLDLOCK) ON m.MovieID = s.MovieID
             WHERE s.ScreenRoomID = @ScreenRoomID AND s.IsCancelled = 0
               AND s.StartDateTime < DATEADD(MINUTE, @Runtime, @StartDateTime)
               AND @StartDateTime < DATEADD(MINUTE, m.RuntimeMinutes, s.StartDateTime))
             THROW 50001, 'Showtime overlaps with another scheduled movie in this room.', 1;
         -- Insert after validation and return the generated key.
-        INSERT dbo.Showtime (MovieID, ScreenRoomID, StartDateTime, TicketPrice, IsCancelled)
-        VALUES (@MovieID, @ScreenRoomID, @StartDateTime, @TicketPrice, @IsCancelled);
+        INSERT dbo.Showtime (MovieID, ScreenRoomID, StartDateTime, TicketPrice, IsCancelled, CancelledOn)
+        VALUES (@MovieID, @ScreenRoomID, @StartDateTime, @TicketPrice, @IsCancelled, CASE WHEN @IsCancelled = 1 THEN SYSDATETIME() ELSE NULL END);
         SELECT CONVERT(INT, SCOPE_IDENTITY()) AS ShowtimeID;
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH
         -- Roll back failed writes, then preserve the original SQL error for ADO.NET.
-        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
         THROW;
     END CATCH;
 END;
@@ -562,44 +594,50 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
     BEGIN TRY
-        -- Make the validation and write atomic, including concurrent API requests.
+        -- Commit validation and the write together; failures roll back the transaction.
         BEGIN TRANSACTION;
-        DECLARE @LockResult INT;
-        EXEC @LockResult = sys.sp_getapplock
-            @Resource = N'MovieTheaterBusinessRules', @LockMode = 'Exclusive',
-            @LockOwner = 'Transaction', @LockTimeout = 10000;
-        IF @LockResult < 0
-            THROW 50003, 'Could not obtain the theater write lock. Retry the operation.', 1;
+        -- Validate numeric ranges before writing the row.
+        IF @TicketPrice IS NULL OR @TicketPrice < 0
+            THROW 50005, 'Ticket price cannot be negative.', 1;
+
+        -- Explain common input mistakes before constraints act as the final safeguard.
+        IF EXISTS (SELECT 1 FROM dbo.Showtime WITH (UPDLOCK, HOLDLOCK) WHERE ScreenRoomID = @ScreenRoomID AND StartDateTime = @StartDateTime AND ShowtimeID <> @ShowtimeID)
+            THROW 50007, 'This room already has a screening at that start time, possibly cancelled. Edit that screening or choose another time.', 1;
+        IF @IsCancelled = 0 AND (NOT EXISTS (SELECT 1 FROM dbo.Movie WITH (UPDLOCK, HOLDLOCK) WHERE MovieID = @MovieID AND IsActive = 1) OR NOT EXISTS (SELECT 1 FROM dbo.ScreenRoom WITH (UPDLOCK, HOLDLOCK) WHERE ScreenRoomID = @ScreenRoomID AND IsActive = 1))
+            THROW 50007, 'Choose an active movie and screening room before scheduling or restoring a screening.', 1;
+
         -- Ensure an update targets an existing screening.
-        IF NOT EXISTS (SELECT 1 FROM dbo.Showtime WHERE ShowtimeID = @ShowtimeID)
+        IF NOT EXISTS (SELECT 1 FROM dbo.Showtime WITH (UPDLOCK, HOLDLOCK) WHERE ShowtimeID = @ShowtimeID)
             THROW 50004, 'Showtime was not found.', 1;
         -- Read the referenced movie and reject missing references with a clear error.
         DECLARE @Runtime INT;
-        SELECT @Runtime = RuntimeMinutes FROM dbo.Movie WHERE MovieID = @MovieID;
-        IF @Runtime IS NULL OR NOT EXISTS (SELECT 1 FROM dbo.ScreenRoom WHERE ScreenRoomID = @ScreenRoomID)
+        SELECT @Runtime = RuntimeMinutes FROM dbo.Movie WITH (UPDLOCK, HOLDLOCK) WHERE MovieID = @MovieID;
+        IF @Runtime IS NULL OR NOT EXISTS (SELECT 1 FROM dbo.ScreenRoom WITH (UPDLOCK, HOLDLOCK) WHERE ScreenRoomID = @ScreenRoomID)
             THROW 50004, 'Movie or screening room was not found.', 1;
         -- Half-open intervals allow the next movie to start exactly when this one ends.
         IF @IsCancelled = 0 AND EXISTS (
-            SELECT 1 FROM dbo.Showtime s JOIN dbo.Movie m ON m.MovieID = s.MovieID
+            SELECT 1 FROM dbo.Showtime s WITH (UPDLOCK, HOLDLOCK) JOIN dbo.Movie m WITH (UPDLOCK, HOLDLOCK) ON m.MovieID = s.MovieID
             WHERE s.ScreenRoomID = @ScreenRoomID AND s.IsCancelled = 0
               AND s.ShowtimeID <> @ShowtimeID
               AND s.StartDateTime < DATEADD(MINUTE, @Runtime, @StartDateTime)
               AND @StartDateTime < DATEADD(MINUTE, m.RuntimeMinutes, s.StartDateTime))
             THROW 50001, 'Showtime overlaps with another scheduled movie in this room.', 1;
         -- Moving a screening to a smaller room must preserve capacity for existing bookings.
-        IF (SELECT COALESCE(SUM(CONVERT(BIGINT, NumberOfTickets)), 0) FROM dbo.Booking WHERE ShowtimeID = @ShowtimeID)
-           > (SELECT Capacity FROM dbo.ScreenRoom WHERE ScreenRoomID = @ScreenRoomID)
+        IF (SELECT COALESCE(SUM(CONVERT(BIGINT, NumberOfTickets)), 0) FROM dbo.Booking WITH (UPDLOCK, HOLDLOCK) WHERE ShowtimeID = @ShowtimeID)
+           > (SELECT Capacity FROM dbo.ScreenRoom WITH (UPDLOCK, HOLDLOCK) WHERE ScreenRoomID = @ScreenRoomID)
             THROW 50002, 'Destination room cannot hold tickets already booked.', 1;
         -- Cancellation retains the screening and its booking history.
         UPDATE dbo.Showtime SET MovieID = @MovieID, ScreenRoomID = @ScreenRoomID,
-            StartDateTime = @StartDateTime, TicketPrice = @TicketPrice, IsCancelled = @IsCancelled
+            StartDateTime = @StartDateTime, TicketPrice = @TicketPrice, IsCancelled = @IsCancelled,
+            -- Retain the original cancellation time until the screening is restored.
+            CancelledOn = CASE WHEN @IsCancelled = 1 THEN COALESCE(CancelledOn, SYSDATETIME()) ELSE NULL END
         WHERE ShowtimeID = @ShowtimeID;
         SELECT @ShowtimeID AS ShowtimeID;
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH
         -- Roll back failed writes, then preserve the original SQL error for ADO.NET.
-        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
         THROW;
     END CATCH;
 END;
@@ -627,41 +665,48 @@ END;
 GO
 
 /*
-Reserve tickets atomically; duplicate customer/screening pairs are rejected by the unique constraint.
+Create a reservation; reject duplicate customer/screening pairs with a friendly message.
 Parameters:
   @CustomerID INT, -- Customer reserving tickets.
   @ShowtimeID INT, -- Screening to reserve.
-  @NumberOfTickets INT -- Positive replacement ticket count.
+  @NumberOfTickets INT -- Positive ticket count to reserve.
 */
 CREATE OR ALTER PROCEDURE dbo.usp_CreateBooking
 @CustomerID INT, -- Customer reserving tickets.
 @ShowtimeID INT, -- Screening to reserve.
-@NumberOfTickets INT -- Positive replacement ticket count.
+@NumberOfTickets INT -- Positive ticket count to reserve.
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
     BEGIN TRY
-        -- Make the validation and write atomic, including concurrent API requests.
+        -- Commit validation and the write together; failures roll back the transaction.
         BEGIN TRANSACTION;
-        DECLARE @LockResult INT;
-        EXEC @LockResult = sys.sp_getapplock
-            @Resource = N'MovieTheaterBusinessRules', @LockMode = 'Exclusive',
-            @LockOwner = 'Transaction', @LockTimeout = 10000;
-        IF @LockResult < 0
-            THROW 50003, 'Could not obtain the theater write lock. Retry the operation.', 1;
+        -- Explain common input mistakes before constraints act as the final safeguard.
+        IF EXISTS (SELECT 1 FROM dbo.Booking WITH (UPDLOCK, HOLDLOCK) WHERE CustomerID = @CustomerID AND ShowtimeID = @ShowtimeID)
+            THROW 50007, 'You already booked this screening. Update your existing booking instead.', 1;
+
         -- Reject invalid quantities before calculating seats or money.
         IF @NumberOfTickets IS NULL OR @NumberOfTickets <= 0
             THROW 50005, 'Number of tickets must be positive.', 1;
         DECLARE @Capacity INT, @Price DECIMAL(10,2), @Cancelled BIT, @Sold BIGINT;
         SELECT @Capacity = sr.Capacity, @Price = s.TicketPrice, @Cancelled = s.IsCancelled
-        FROM dbo.Showtime s JOIN dbo.ScreenRoom sr ON sr.ScreenRoomID = s.ScreenRoomID
+        FROM dbo.Showtime s WITH (UPDLOCK, HOLDLOCK) JOIN dbo.ScreenRoom sr WITH (UPDLOCK, HOLDLOCK) ON sr.ScreenRoomID = s.ScreenRoomID
         WHERE s.ShowtimeID = @ShowtimeID;
         IF @Capacity IS NULL THROW 50004, 'Showtime was not found.', 1;
+        -- Reservations require active participants, even when called outside the UI.
+        IF NOT EXISTS (SELECT 1 FROM dbo.Customer WITH (UPDLOCK, HOLDLOCK) WHERE CustomerID = @CustomerID AND IsActive = 1)
+            THROW 50008, 'This customer is inactive. Reactivate the account before booking.', 1;
+        IF EXISTS (
+            SELECT 1 FROM dbo.Showtime s WITH (UPDLOCK, HOLDLOCK)
+            JOIN dbo.Movie m WITH (UPDLOCK, HOLDLOCK) ON m.MovieID = s.MovieID
+            JOIN dbo.ScreenRoom sr WITH (UPDLOCK, HOLDLOCK) ON sr.ScreenRoomID = s.ScreenRoomID
+            WHERE s.ShowtimeID = @ShowtimeID AND (m.IsActive = 0 OR sr.IsActive = 0))
+            THROW 50008, 'This movie or screening room is inactive. Choose another screening.', 1;
         IF @Cancelled = 1 THROW 50002, 'Cannot book tickets for a cancelled showtime.', 1;
-        -- On update, exclude this booking so its old tickets become available to its replacement.
+        -- Sum existing reservations before checking available seats.
         SELECT @Sold = COALESCE(SUM(CONVERT(BIGINT, NumberOfTickets)), 0)
-        FROM dbo.Booking WHERE ShowtimeID = @ShowtimeID
+        FROM dbo.Booking WITH (UPDLOCK, HOLDLOCK) WHERE ShowtimeID = @ShowtimeID
         ;
         IF @NumberOfTickets > @Capacity - @Sold
             THROW 50002, 'Not enough remaining seats in this screening room.', 1;
@@ -673,17 +718,17 @@ BEGIN
     END TRY
     BEGIN CATCH
         -- Roll back failed writes, then preserve the original SQL error for ADO.NET.
-        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
         THROW;
     END CATCH;
 END;
 GO
 
 /*
-Reserve tickets atomically; duplicate customer/screening pairs are rejected by the unique constraint.
+Replace the ticket count of an existing booking; preserve its customer and screening.
 Parameters:
   @BookingID INT, -- Existing booking to edit.
-  @NumberOfTickets INT -- Positive replacement ticket count.
+  @NumberOfTickets INT -- Positive ticket count to reserve.
 */
 CREATE OR ALTER PROCEDURE dbo.usp_UpdateBooking
 @BookingID INT, -- Existing booking to edit.
@@ -693,30 +738,35 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
     BEGIN TRY
-        -- Make the validation and write atomic, including concurrent API requests.
+        -- Commit validation and the write together; failures roll back the transaction.
         BEGIN TRANSACTION;
-        DECLARE @LockResult INT;
-        EXEC @LockResult = sys.sp_getapplock
-            @Resource = N'MovieTheaterBusinessRules', @LockMode = 'Exclusive',
-            @LockOwner = 'Transaction', @LockTimeout = 10000;
-        IF @LockResult < 0
-            THROW 50003, 'Could not obtain the theater write lock. Retry the operation.', 1;
+        -- Explain common input mistakes before constraints act as the final safeguard.
+
         -- Find the screening belonging to this booking; its customer and screening stay fixed.
         DECLARE @ShowtimeID INT;
-        SELECT @ShowtimeID = ShowtimeID FROM dbo.Booking WHERE BookingID = @BookingID;
+        SELECT @ShowtimeID = ShowtimeID FROM dbo.Booking WITH (UPDLOCK, HOLDLOCK) WHERE BookingID = @BookingID;
         IF @ShowtimeID IS NULL THROW 50004, 'Booking was not found.', 1;
         -- Reject invalid quantities before calculating seats or money.
         IF @NumberOfTickets IS NULL OR @NumberOfTickets <= 0
             THROW 50005, 'Number of tickets must be positive.', 1;
         DECLARE @Capacity INT, @Price DECIMAL(10,2), @Cancelled BIT, @Sold BIGINT;
         SELECT @Capacity = sr.Capacity, @Price = s.TicketPrice, @Cancelled = s.IsCancelled
-        FROM dbo.Showtime s JOIN dbo.ScreenRoom sr ON sr.ScreenRoomID = s.ScreenRoomID
+        FROM dbo.Showtime s WITH (UPDLOCK, HOLDLOCK) JOIN dbo.ScreenRoom sr WITH (UPDLOCK, HOLDLOCK) ON sr.ScreenRoomID = s.ScreenRoomID
         WHERE s.ShowtimeID = @ShowtimeID;
         IF @Capacity IS NULL THROW 50004, 'Showtime was not found.', 1;
+        -- Reservations require active participants, even when called outside the UI.
+        IF NOT EXISTS (SELECT 1 FROM dbo.Customer WITH (UPDLOCK, HOLDLOCK) WHERE CustomerID = (SELECT CustomerID FROM dbo.Booking WITH (UPDLOCK, HOLDLOCK) WHERE BookingID = @BookingID) AND IsActive = 1)
+            THROW 50008, 'This customer is inactive. Reactivate the account before booking.', 1;
+        IF EXISTS (
+            SELECT 1 FROM dbo.Showtime s WITH (UPDLOCK, HOLDLOCK)
+            JOIN dbo.Movie m WITH (UPDLOCK, HOLDLOCK) ON m.MovieID = s.MovieID
+            JOIN dbo.ScreenRoom sr WITH (UPDLOCK, HOLDLOCK) ON sr.ScreenRoomID = s.ScreenRoomID
+            WHERE s.ShowtimeID = @ShowtimeID AND (m.IsActive = 0 OR sr.IsActive = 0))
+            THROW 50008, 'This movie or screening room is inactive. Choose another screening.', 1;
         IF @Cancelled = 1 THROW 50002, 'Cannot book tickets for a cancelled showtime.', 1;
         -- On update, exclude this booking so its old tickets become available to its replacement.
         SELECT @Sold = COALESCE(SUM(CONVERT(BIGINT, NumberOfTickets)), 0)
-        FROM dbo.Booking WHERE ShowtimeID = @ShowtimeID
+        FROM dbo.Booking WITH (UPDLOCK, HOLDLOCK) WHERE ShowtimeID = @ShowtimeID
           AND BookingID <> @BookingID
         ;
         IF @NumberOfTickets > @Capacity - @Sold
@@ -729,7 +779,7 @@ BEGIN
     END TRY
     BEGIN CATCH
         -- Roll back failed writes, then preserve the original SQL error for ADO.NET.
-        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
         THROW;
     END CATCH;
 END;
@@ -765,14 +815,10 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
     BEGIN TRY
-        -- Make the validation and write atomic, including concurrent API requests.
+        -- Commit validation and the write together; failures roll back the transaction.
         BEGIN TRANSACTION;
-        DECLARE @LockResult INT;
-        EXEC @LockResult = sys.sp_getapplock
-            @Resource = N'MovieTheaterBusinessRules', @LockMode = 'Exclusive',
-            @LockOwner = 'Transaction', @LockTimeout = 10000;
-        IF @LockResult < 0
-            THROW 50003, 'Could not obtain the theater write lock. Retry the operation.', 1;
+        -- Explain common input mistakes before constraints act as the final safeguard.
+
         -- Only bookings and reviews are hard-deleted in this project.
         DELETE FROM dbo.Booking WHERE BookingID = @BookingID;
         IF @@ROWCOUNT = 0 THROW 50004, 'Booking was not found.', 1;
@@ -780,7 +826,7 @@ BEGIN
     END TRY
     BEGIN CATCH
         -- Roll back failed writes, then preserve the original SQL error for ADO.NET.
-        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
         THROW;
     END CATCH;
 END;
@@ -798,14 +844,10 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
     BEGIN TRY
-        -- Make the validation and write atomic, including concurrent API requests.
+        -- Commit validation and the write together; failures roll back the transaction.
         BEGIN TRANSACTION;
-        DECLARE @LockResult INT;
-        EXEC @LockResult = sys.sp_getapplock
-            @Resource = N'MovieTheaterBusinessRules', @LockMode = 'Exclusive',
-            @LockOwner = 'Transaction', @LockTimeout = 10000;
-        IF @LockResult < 0
-            THROW 50003, 'Could not obtain the theater write lock. Retry the operation.', 1;
+        -- Explain common input mistakes before constraints act as the final safeguard.
+
         -- Only bookings and reviews are hard-deleted in this project.
         DELETE FROM dbo.Review WHERE ReviewID = @ReviewID;
         IF @@ROWCOUNT = 0 THROW 50004, 'Review was not found.', 1;
@@ -813,7 +855,7 @@ BEGIN
     END TRY
     BEGIN CATCH
         -- Roll back failed writes, then preserve the original SQL error for ADO.NET.
-        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
         THROW;
     END CATCH;
 END;

@@ -93,9 +93,9 @@ public class BookingsController : ControllerBase
 
             // Step 3: Bind values separately from SQL text to prevent SQL injection.
             // Explicit SQL types and lengths match the procedure; DBNull.Value represents SQL NULL.
-            cmd.Parameters.Add("@CustomerID", SqlDbType.Int).Value = (object?)(request.CustomerId) ?? DBNull.Value;
-            cmd.Parameters.Add("@ShowtimeID", SqlDbType.Int).Value = (object?)(request.ShowtimeId) ?? DBNull.Value;
-            cmd.Parameters.Add("@NumberOfTickets", SqlDbType.Int).Value = (object?)(request.NumberOfTickets) ?? DBNull.Value;
+            cmd.Parameters.Add("@CustomerID", SqlDbType.Int).Value = request.CustomerId;
+            cmd.Parameters.Add("@ShowtimeID", SqlDbType.Int).Value = request.ShowtimeId;
+            cmd.Parameters.Add("@NumberOfTickets", SqlDbType.Int).Value = request.NumberOfTickets;
 
             // Step 4: Read the identifier returned by the write procedure.
             using SqlDataReader reader = await cmd.ExecuteReaderAsync();
@@ -131,8 +131,8 @@ public class BookingsController : ControllerBase
 
             // Step 3: Bind values separately from SQL text to prevent SQL injection.
             // Explicit SQL types and lengths match the procedure; DBNull.Value represents SQL NULL.
-            cmd.Parameters.Add("@BookingID", SqlDbType.Int).Value = (object?)(id) ?? DBNull.Value;
-            cmd.Parameters.Add("@NumberOfTickets", SqlDbType.Int).Value = (object?)(request.NumberOfTickets) ?? DBNull.Value;
+            cmd.Parameters.Add("@BookingID", SqlDbType.Int).Value = id;
+            cmd.Parameters.Add("@NumberOfTickets", SqlDbType.Int).Value = request.NumberOfTickets;
 
             // Step 4: Read the identifier returned by the write procedure.
             using SqlDataReader reader = await cmd.ExecuteReaderAsync();
@@ -168,7 +168,7 @@ public class BookingsController : ControllerBase
 
             // Step 3: Bind values separately from SQL text to prevent SQL injection.
             // Explicit SQL types and lengths match the procedure; DBNull.Value represents SQL NULL.
-            cmd.Parameters.Add("@BookingID", SqlDbType.Int).Value = (object?)(id) ?? DBNull.Value;
+            cmd.Parameters.Add("@BookingID", SqlDbType.Int).Value = id;
 
             // Step 4: Execute the delete; the procedure throws if the identifier does not exist.
             // Do not interpret the affected-row count: our procedures use SET NOCOUNT ON.

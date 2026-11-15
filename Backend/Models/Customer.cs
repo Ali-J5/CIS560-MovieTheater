@@ -22,6 +22,9 @@ public class Customer
 
     // False soft-deletes this record while retaining database history.
     public bool IsActive { get; set; }
+
+    // Database-managed status change time; null while the record is active.
+    public DateTime? DeactivatedOn { get; set; }
 }
 
 // JSON body for create/full-replacement update requests.

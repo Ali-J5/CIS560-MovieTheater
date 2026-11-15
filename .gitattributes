@@ -1,0 +1,3 @@
+# Keep launchers runnable when contributors clone with different Git line-ending settings.
+*.sh text eol=lf
+*.bat text eol=crlf

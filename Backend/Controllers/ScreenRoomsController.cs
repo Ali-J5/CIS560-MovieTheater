@@ -39,7 +39,7 @@ public class ScreenRoomsController : ControllerBase
 
             // Step 3: Bind values separately from SQL text to prevent SQL injection.
             // Explicit SQL types and lengths match the procedure; DBNull.Value represents SQL NULL.
-            cmd.Parameters.Add("@IncludeInactive", SqlDbType.Bit).Value = (object?)(includeInactive) ?? DBNull.Value;
+            cmd.Parameters.Add("@IncludeInactive", SqlDbType.Bit).Value = includeInactive;
 
             // Step 4: Execute the procedure and read each result row into a plain C# object.
             var results = new List<ScreenRoom>();
@@ -55,6 +55,7 @@ public class ScreenRoomsController : ControllerBase
                     ScreenType = (string)reader["ScreenType"],
                     Capacity = (int)reader["Capacity"],
                     IsActive = (bool)reader["IsActive"],
+                    DeactivatedOn = reader["DeactivatedOn"] == DBNull.Value ? null : (DateTime)reader["DeactivatedOn"],
                 });
             }
 
@@ -85,11 +86,11 @@ public class ScreenRoomsController : ControllerBase
 
             // Step 3: Bind values separately from SQL text to prevent SQL injection.
             // Explicit SQL types and lengths match the procedure; DBNull.Value represents SQL NULL.
-            cmd.Parameters.Add("@RoomNumber", SqlDbType.NVarChar, 100).Value = (object?)request.RoomNumber ?? DBNull.Value;
-            cmd.Parameters.Add("@Name", SqlDbType.NVarChar, 100).Value = (object?)request.Name ?? DBNull.Value;
-            cmd.Parameters.Add("@ScreenType", SqlDbType.NVarChar, 50).Value = (object?)request.ScreenType ?? DBNull.Value;
-            cmd.Parameters.Add("@Capacity", SqlDbType.Int).Value = (object?)(request.Capacity) ?? DBNull.Value;
-            cmd.Parameters.Add("@IsActive", SqlDbType.Bit).Value = (object?)(request.IsActive) ?? DBNull.Value;
+            cmd.Parameters.Add("@RoomNumber", SqlDbType.NVarChar, 100).Value = request.RoomNumber;
+            cmd.Parameters.Add("@Name", SqlDbType.NVarChar, 100).Value = request.Name;
+            cmd.Parameters.Add("@ScreenType", SqlDbType.NVarChar, 50).Value = request.ScreenType;
+            cmd.Parameters.Add("@Capacity", SqlDbType.Int).Value = request.Capacity;
+            cmd.Parameters.Add("@IsActive", SqlDbType.Bit).Value = request.IsActive;
 
             // Step 4: Read the identifier returned by the write procedure.
             using SqlDataReader reader = await cmd.ExecuteReaderAsync();
@@ -125,12 +126,12 @@ public class ScreenRoomsController : ControllerBase
 
             // Step 3: Bind values separately from SQL text to prevent SQL injection.
             // Explicit SQL types and lengths match the procedure; DBNull.Value represents SQL NULL.
-            cmd.Parameters.Add("@ScreenRoomID", SqlDbType.Int).Value = (object?)(id) ?? DBNull.Value;
-            cmd.Parameters.Add("@RoomNumber", SqlDbType.NVarChar, 100).Value = (object?)request.RoomNumber ?? DBNull.Value;
-            cmd.Parameters.Add("@Name", SqlDbType.NVarChar, 100).Value = (object?)request.Name ?? DBNull.Value;
-            cmd.Parameters.Add("@ScreenType", SqlDbType.NVarChar, 50).Value = (object?)request.ScreenType ?? DBNull.Value;
-            cmd.Parameters.Add("@Capacity", SqlDbType.Int).Value = (object?)(request.Capacity) ?? DBNull.Value;
-            cmd.Parameters.Add("@IsActive", SqlDbType.Bit).Value = (object?)(request.IsActive) ?? DBNull.Value;
+            cmd.Parameters.Add("@ScreenRoomID", SqlDbType.Int).Value = id;
+            cmd.Parameters.Add("@RoomNumber", SqlDbType.NVarChar, 100).Value = request.RoomNumber;
+            cmd.Parameters.Add("@Name", SqlDbType.NVarChar, 100).Value = request.Name;
+            cmd.Parameters.Add("@ScreenType", SqlDbType.NVarChar, 50).Value = request.ScreenType;
+            cmd.Parameters.Add("@Capacity", SqlDbType.Int).Value = request.Capacity;
+            cmd.Parameters.Add("@IsActive", SqlDbType.Bit).Value = request.IsActive;
 
             // Step 4: Read the identifier returned by the write procedure.
             using SqlDataReader reader = await cmd.ExecuteReaderAsync();
