@@ -111,6 +111,18 @@ npm run build --prefix Frontend
 
 For a manual database reset, deliberately select a disposable database and run `Tables.sql`, `Procedures.sql`, then `Data.sql`. This deletes existing project data. Normal startup and re-launches do not require a reset. Dates remain as originally seeded on subsequent starts; schedule new screenings through the UI when the original schedule becomes historical.
 
+## Run the controller tests
+
+Start SQL Server, then run this command from the repository root. The web API and frontend can stay stopped.
+
+```sh
+dotnet test Backend.Tests/Backend.Tests.csproj
+```
+
+The MSTest project calls the controllers directly against real SQL Server. By default it loads `Backend/appsettings.json` and layers `Backend/appsettings.Development.json` on top when present. An explicit environment name selects its corresponding settings file, and `ConnectionStrings__DefaultConnection` still takes precedence. The suite uses the backend's database initializer, rolls back each test's writes with a `TransactionScope`, and compares committed row counts for all seven tables before and after the tests.
+
+Use a local classroom database and avoid editing it while the tests run. SQL Server identity values can advance even when the rows are rolled back.
+
 ## API and UI functionality
 
 All JSON uses camelCase. Dates use `yyyy-MM-dd`; screening times are theater-local values with no UTC conversion.
