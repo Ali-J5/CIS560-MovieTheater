@@ -42,7 +42,7 @@ if [[ -z "${ConnectionStrings__DefaultConnection:-}" ]]; then
       exit 1
     fi
     # Keep database files in a Docker volume, outside the submission repository.
-    export MSSQL_SA_PASSWORD="${MSSQL_SA_PASSWORD:-Cinema560!LocalDemo2026}"
+    export MSSQL_SA_PASSWORD="${MSSQL_SA_PASSWORD:-Frame560!d1fa85fafb28f1fcbd043aa4df1cfc5daA}"
     container="cis560-movie-booking-sql"
     if docker container inspect "$container" >/dev/null 2>&1; then
       echo "Starting the existing project SQL Server container..."

@@ -38,7 +38,7 @@ The three SQL scripts are copied into backend build/publish output, so published
 
 The launchers create **cis560-movie-booking-sql** using the official SQL Server 2022 Developer image, with physical data in Docker volume **cis560-movie-booking-data**. Port 1433 is published only on `127.0.0.1`. On Apple Silicon, the image uses x86-64 emulation; Docker must support it. Running the launcher to create this container accepts the SQL Server image's EULA; Developer Edition is for development/classroom use.
 
-The public local-demo password is `Cinema560!LocalDemo2026`. It matches `appsettings.json`; it is not a production credential. You can set `MSSQL_SA_PASSWORD` before creating the launcher-managed container to choose a different password. The container keeps its original password with its volume, so continue using that same value on later launches.
+The launchers use the local-demo password in `Backend/appsettings.json` by default. You can set `MSSQL_SA_PASSWORD` before creating the launcher-managed container to choose a different password. The container keeps its original password with its volume, so continue using that same value on later launches.
 
 For an existing server with other credentials, set the complete connection string before running the launcher. The launcher will not start local Docker when this override is present:
 

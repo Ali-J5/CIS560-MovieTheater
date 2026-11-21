@@ -50,7 +50,7 @@ where docker >nul 2>&1
 if errorlevel 1 goto missing_sql
 docker info >nul 2>&1
 if errorlevel 1 goto missing_sql
-if not defined MSSQL_SA_PASSWORD set "MSSQL_SA_PASSWORD=Cinema560!LocalDemo2026"
+if not defined MSSQL_SA_PASSWORD set "MSSQL_SA_PASSWORD=Frame560!d1fa85fafb28f1fcbd043aa4df1cfc5daA"
 docker container inspect cis560-movie-booking-sql >nul 2>&1
 if errorlevel 1 goto create_container
 echo Starting the existing project SQL Server container...
